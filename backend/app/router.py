@@ -9,12 +9,12 @@ from sqlalchemy.orm import Session
 from .config import FACE_DETECTION_MODEL, FACE_TOLERANCE, UPLOADS_DIR
 from .database import get_db
 from .models import Quiz
-from .schemas import FaceMatch, QuizOut, UploadResult
+from .schemas import CheckResult, FaceMatch, QuizOut, UploadResult
 from .services import (
-    find_matches,
+    check_faces_from_images,
     get_or_create_game,
     get_or_create_quiz,
-    load_old_faces,
+    load_all_quiz_faces,
     process_photo,
 )
 
@@ -39,7 +39,7 @@ def list_quizzes(db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
-# POST /upload
+# POST /upload  — сохранить фото в базу, вернуть кол-во найденных лиц
 # ---------------------------------------------------------------------------
 
 @router.post("/upload", response_model=UploadResult)
@@ -55,10 +55,6 @@ async def upload_photos(
     try:
         quiz = get_or_create_quiz(db, quiz_name.strip())
         game = get_or_create_game(db, quiz.id, game_date)
-
-        # Load historical faces BEFORE inserting new ones so the query
-        # cannot accidentally return faces from the current upload.
-        old_data = load_old_faces(db, quiz.id, game.id)
 
         new_face_records = []
         for upload in files:
@@ -81,19 +77,10 @@ async def upload_photos(
             )
             new_face_records.extend(faces)
 
-        # Run matching while the session is still open (objects are live).
-        cheaters_raw = find_matches(new_face_records, old_data, tolerance=FACE_TOLERANCE)
-
         db.commit()
-        logger.info(
-            "Upload complete: quiz=%r game=%s faces=%d matches=%d",
-            quiz_name, game_date, len(new_face_records), len(cheaters_raw),
-        )
+        logger.info("Upload complete: quiz=%r game=%s faces=%d", quiz_name, game_date, len(new_face_records))
 
-        return UploadResult(
-            total_faces_found=len(new_face_records),
-            cheaters=[FaceMatch(**m) for m in cheaters_raw],
-        )
+        return UploadResult(total_faces_found=len(new_face_records))
 
     except HTTPException:
         raise
@@ -104,16 +91,66 @@ async def upload_photos(
 
 
 # ---------------------------------------------------------------------------
+# POST /check  — проверить фото на совпадения, ничего не сохранять
+# ---------------------------------------------------------------------------
+
+@router.post("/check", response_model=CheckResult)
+async def check_photos(
+    files: list[UploadFile] = File(..., description="One or more photo files"),
+    quiz_name: str = Form(..., min_length=1, max_length=255),
+    db: Session = Depends(get_db),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file is required")
+
+    quiz = db.query(Quiz).filter(Quiz.name == quiz_name.strip()).first()
+    if not quiz:
+        raise HTTPException(status_code=404, detail=f"Квиз «{quiz_name}» не найден")
+
+    try:
+        all_data = load_all_quiz_faces(db, quiz.id)
+
+        images: list[tuple[bytes, str]] = []
+        for upload in files:
+            if upload.content_type and upload.content_type not in ALLOWED_CONTENT_TYPES:
+                logger.warning("Skipping %r: unsupported type %s", upload.filename, upload.content_type)
+                continue
+            image_data = await upload.read()
+            if image_data:
+                images.append((image_data, upload.filename or "photo.jpg"))
+
+        total, cheaters_raw = check_faces_from_images(
+            images,
+            all_data,
+            UPLOADS_DIR,
+            tolerance=FACE_TOLERANCE,
+            detection_model=FACE_DETECTION_MODEL,
+        )
+
+        logger.info("Check complete: quiz=%r faces=%d matches=%d", quiz_name, total, len(cheaters_raw))
+
+        return CheckResult(
+            total_faces_found=total,
+            cheaters=[FaceMatch(**m) for m in cheaters_raw],
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Check failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
 # GET /faces/{filepath}
 # ---------------------------------------------------------------------------
 
 @router.get("/faces/{filepath:path}")
 def serve_face(filepath: str):
-    """Serve a face crop image by its relative path (game_id/uuid.jpg)."""
+    """Serve a face crop image by its relative path (game_id/uuid.jpg or tmp/uuid.jpg)."""
     faces_base = os.path.realpath(os.path.join(UPLOADS_DIR, "faces"))
     full_path = os.path.realpath(os.path.join(faces_base, filepath))
 
-    # Guard against path traversal
     if not full_path.startswith(faces_base + os.sep) and full_path != faces_base:
         raise HTTPException(status_code=400, detail="Invalid path")
 

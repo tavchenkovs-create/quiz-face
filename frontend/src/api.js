@@ -13,15 +13,24 @@ export async function uploadPhotos({ files, quizName, gameDate }) {
   for (const file of files) form.append('files', file)
 
   const res = await fetch(`${BASE_URL}/upload`, { method: 'POST', body: form })
-
   if (!res.ok) {
     let detail = `Ошибка сервера (${res.status})`
-    try {
-      const body = await res.json()
-      if (body.detail) detail = body.detail
-    } catch (_) {}
+    try { const b = await res.json(); if (b.detail) detail = b.detail } catch (_) {}
     throw new Error(detail)
   }
+  return res.json()
+}
 
+export async function checkPhotos({ files, quizName }) {
+  const form = new FormData()
+  form.append('quiz_name', quizName)
+  for (const file of files) form.append('files', file)
+
+  const res = await fetch(`${BASE_URL}/check`, { method: 'POST', body: form })
+  if (!res.ok) {
+    let detail = `Ошибка сервера (${res.status})`
+    try { const b = await res.json(); if (b.detail) detail = b.detail } catch (_) {}
+    throw new Error(detail)
+  }
   return res.json()
 }

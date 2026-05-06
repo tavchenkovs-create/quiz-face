@@ -17,4 +17,8 @@ class FaceMatch(BaseModel):
 
 class UploadResult(BaseModel):
     total_faces_found: int
+
+
+class CheckResult(BaseModel):
+    total_faces_found: int
     cheaters: list[FaceMatch]

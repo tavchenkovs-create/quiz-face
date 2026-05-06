@@ -300,6 +300,43 @@ body {
   flex-shrink: 0;
 }
 
+/* ─── Tabs ───────────────────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  border-bottom: 2px solid var(--border);
+  /* stretch to card edges, then indent tab labels */
+  margin: -1.75rem -1.75rem 1.75rem;
+  padding: 0 1.75rem;
+}
+.tab {
+  padding: .75rem 1.25rem;
+  font-size: .9375rem;
+  font-weight: 600;
+  background: none;
+  border: none;
+  border-bottom: 2.5px solid transparent;
+  margin-bottom: -2px;
+  color: var(--muted);
+  transition: color .15s, border-color .15s;
+}
+.tab:hover:not(.tab--active) { color: var(--text); }
+.tab--active { color: var(--primary); border-bottom-color: var(--primary); }
+
+/* ─── Upload success message ─────────────────────────────────────────────── */
+.upload-success {
+  display: flex;
+  align-items: center;
+  gap: .625rem;
+  background: var(--success-bg);
+  border: 1.5px solid var(--success-border);
+  border-radius: 8px;
+  padding: .875rem 1rem;
+  margin-bottom: 1.5rem;
+  color: var(--success);
+  font-weight: 600;
+  font-size: .9375rem;
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 540px) {
   .app-header__sub { display: none; }
