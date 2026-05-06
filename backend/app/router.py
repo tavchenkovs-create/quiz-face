@@ -67,7 +67,7 @@ def _process_images_bg(
         data, name = item
         return extract_faces_parallel(data, name, game_id, UPLOADS_DIR, FACE_DETECTION_MODEL)
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {executor.submit(_detect, img): img for img in images}
         for future in as_completed(futures):
             face_results: list[dict] = []
@@ -143,7 +143,7 @@ def _run_vk_bg(
                 logger.warning("Failed to download %s: %s", url, exc)
                 return None
 
-        with ThreadPoolExecutor(max_workers=10) as dl_ex:
+        with ThreadPoolExecutor(max_workers=5) as dl_ex:
             raw = list(dl_ex.map(_download, urls))
 
         images = [(data, f"vk_{i+1}.jpg") for i, data in enumerate(raw) if data is not None]

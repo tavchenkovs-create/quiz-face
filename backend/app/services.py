@@ -195,6 +195,9 @@ def extract_faces_parallel(
         logger.warning("Cannot open %r: %s", filename, exc)
         return original_relative, []
 
+    if max(pil_image.size) > 1200:
+        pil_image.thumbnail((1200, 1200), Image.LANCZOS)
+
     np_image = np.array(pil_image)
     logger.info("Processing %r (%dx%d)", filename, np_image.shape[1], np_image.shape[0])
 
