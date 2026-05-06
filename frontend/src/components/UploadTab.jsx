@@ -17,9 +17,14 @@ export default function UploadTab({ quizzes, onRefresh }) {
   const [error, setError]           = useState(null)
 
   const intervalRef = useRef(null)
+  const timerRef    = useRef(null)
+  const [elapsed, setElapsed] = useState(0)
 
-  // Clean up polling interval on unmount
-  useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current) }, [])
+  // Clean up both intervals on unmount
+  useEffect(() => () => {
+    if (intervalRef.current) clearInterval(intervalRef.current)
+    if (timerRef.current)    clearInterval(timerRef.current)
+  }, [])
 
   const isProcessing = progress !== null
 
@@ -29,9 +34,23 @@ export default function UploadTab({ quizzes, onRefresh }) {
 
   const handleSourceChange = (val) => { setSource(val); setError(null); setSaved(null) }
 
+  const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
   const startPolling = (taskId) => {
     setProgress({ processed: 0, total: 0, facesFound: 0 })
+    setElapsed(0)
     let failures = 0
+    let seconds = 0
+
+    timerRef.current = setInterval(() => {
+      seconds += 1
+      setElapsed(seconds)
+    }, 1000)
+
+    const stopAll = () => {
+      clearInterval(intervalRef.current); intervalRef.current = null
+      clearInterval(timerRef.current);    timerRef.current    = null
+    }
 
     intervalRef.current = setInterval(async () => {
       try {
@@ -47,24 +66,21 @@ export default function UploadTab({ quizzes, onRefresh }) {
         })
 
         if (data.error) {
-          clearInterval(intervalRef.current)
-          intervalRef.current = null
+          stopAll()
           setError(data.error)
           setProgress(null)
           return
         }
 
         if (data.done) {
-          clearInterval(intervalRef.current)
-          intervalRef.current = null
-          setSaved({ total_faces_found: data.faces_found, total_photos: data.total_photos ?? data.total })
+          stopAll()
+          setSaved({ total_faces_found: data.faces_found, total_photos: data.total_photos ?? data.total, elapsed: seconds })
           setProgress(null)
         }
       } catch {
         failures += 1
         if (failures >= 3) {
-          clearInterval(intervalRef.current)
-          intervalRef.current = null
+          stopAll()
           setError('Потеряно соединение с сервером во время обработки')
           setProgress(null)
         }
@@ -114,6 +130,7 @@ export default function UploadTab({ quizzes, onRefresh }) {
           <span aria-hidden="true">✓</span>
           Сохранено. Найдено лиц: {saved.total_faces_found}
           {saved.total_photos != null && ` (из ${saved.total_photos} фото)`}
+          {saved.elapsed != null && ` за ${fmtTime(saved.elapsed)}`}
         </div>
       )}
 
@@ -122,6 +139,8 @@ export default function UploadTab({ quizzes, onRefresh }) {
           processed={progress.processed}
           total={progress.total}
           facesFound={progress.facesFound}
+          elapsed={elapsed}
+          fmtTime={fmtTime}
         />
       )}
 
