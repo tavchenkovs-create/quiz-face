@@ -22,3 +22,14 @@ class UploadResult(BaseModel):
 class CheckResult(BaseModel):
     total_faces_found: int
     cheaters: list[FaceMatch]
+
+
+class VkUploadRequest(BaseModel):
+    album_url: str
+    quiz_name: str
+    game_date: str  # YYYY-MM-DD
+
+
+class VkUploadResult(BaseModel):
+    total_faces_found: int
+    total_photos: int

@@ -1,15 +1,16 @@
 import logging
 import os
-from datetime import date
+from datetime import date as date_type
 
+import requests as http_requests
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from .config import FACE_DETECTION_MODEL, FACE_TOLERANCE, UPLOADS_DIR
+from .config import FACE_DETECTION_MODEL, FACE_TOLERANCE, UPLOADS_DIR, VK_SERVICE_KEY
 from .database import get_db
 from .models import Quiz
-from .schemas import CheckResult, FaceMatch, QuizOut, UploadResult
+from .schemas import CheckResult, FaceMatch, QuizOut, UploadResult, VkUploadRequest, VkUploadResult
 from .services import (
     check_faces_from_images,
     get_or_create_game,
@@ -17,6 +18,7 @@ from .services import (
     load_all_quiz_faces,
     process_photo,
 )
+from .vk import get_album_photos
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,7 @@ def list_quizzes(db: Session = Depends(get_db)):
 async def upload_photos(
     files: list[UploadFile] = File(..., description="One or more photo files"),
     quiz_name: str = Form(..., min_length=1, max_length=255),
-    game_date: date = Form(..., description="YYYY-MM-DD"),
+    game_date: date_type = Form(..., description="YYYY-MM-DD"),
     db: Session = Depends(get_db),
 ):
     if not files:
@@ -138,6 +140,69 @@ async def check_photos(
         raise
     except Exception as exc:
         logger.exception("Check failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# POST /upload-from-vk  — скачать альбом ВКонтакте и сохранить в базу
+# ---------------------------------------------------------------------------
+
+@router.post("/upload-from-vk", response_model=VkUploadResult)
+async def upload_from_vk(
+    body: VkUploadRequest,
+    db: Session = Depends(get_db),
+):
+    if not VK_SERVICE_KEY:
+        raise HTTPException(status_code=503, detail="VK_SERVICE_KEY не задан на сервере")
+
+    try:
+        game_date = date_type.fromisoformat(body.game_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный формат даты, ожидается YYYY-MM-DD")
+
+    # --- download photos from VK -------------------------------------------
+    try:
+        photos = get_album_photos(body.album_url, VK_SERVICE_KEY)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except http_requests.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Ошибка при обращении к ВКонтакте: {exc}")
+    except Exception as exc:
+        logger.exception("VK fetch failed")
+        raise HTTPException(status_code=502, detail=f"Не удалось загрузить альбом: {exc}")
+
+    if not photos:
+        raise HTTPException(status_code=400, detail="В альбоме не найдено фотографий")
+
+    # --- save to DB --------------------------------------------------------
+    try:
+        quiz = get_or_create_quiz(db, body.quiz_name.strip())
+        game = get_or_create_game(db, quiz.id, game_date)
+
+        total_faces = 0
+        for i, image_data in enumerate(photos):
+            faces = process_photo(
+                db,
+                image_data,
+                f"vk_photo_{i + 1}.jpg",
+                game,
+                UPLOADS_DIR,
+                detection_model=FACE_DETECTION_MODEL,
+            )
+            total_faces += len(faces)
+
+        db.commit()
+        logger.info(
+            "VK upload complete: quiz=%r game=%s photos=%d faces=%d",
+            body.quiz_name, game_date, len(photos), total_faces,
+        )
+        return VkUploadResult(total_faces_found=total_faces, total_photos=len(photos))
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("VK upload DB save failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

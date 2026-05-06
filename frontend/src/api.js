@@ -21,6 +21,20 @@ export async function uploadPhotos({ files, quizName, gameDate }) {
   return res.json()
 }
 
+export async function uploadFromVk({ quizName, gameDate, albumUrl }) {
+  const res = await fetch(`${BASE_URL}/upload-from-vk`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quiz_name: quizName, game_date: gameDate, album_url: albumUrl }),
+  })
+  if (!res.ok) {
+    let detail = `Ошибка сервера (${res.status})`
+    try { const b = await res.json(); if (b.detail) detail = b.detail } catch (_) {}
+    throw new Error(detail)
+  }
+  return res.json()
+}
+
 export async function checkPhotos({ files, quizName }) {
   const form = new FormData()
   form.append('quiz_name', quizName)

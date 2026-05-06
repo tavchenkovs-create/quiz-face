@@ -1,0 +1,86 @@
+import logging
+import re
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+VK_API = "https://api.vk.com/method/"
+VK_API_VERSION = "5.131"
+
+
+def _parse_album_url(url: str) -> tuple[int, int]:
+    """
+    Extract (owner_id, album_id) from a VK album URL.
+
+    Supported formats:
+      https://vk.com/album-12345_67890
+      https://vk.com/id123?z=album123_456
+      https://vk.com/clubname?z=album-12345_67890
+    """
+    match = re.search(r"album(-?\d+)_(\d+)", url)
+    if not match:
+        raise ValueError(
+            f"Не удалось распознать ссылку на альбом ВКонтакте: {url!r}. "
+            "Ожидаемый формат: https://vk.com/album-XXXXX_YYYYY"
+        )
+    return int(match.group(1)), int(match.group(2))
+
+
+def get_album_photos(album_url: str, vk_token: str) -> list[bytes]:
+    """
+    Fetch all photos from a public VK album and return them as a list of bytes.
+    Raises ValueError for bad URLs / API errors, requests.HTTPError for network errors.
+    """
+    owner_id, album_id = _parse_album_url(album_url)
+    logger.info("Fetching VK album owner_id=%d album_id=%d", owner_id, album_id)
+
+    resp = requests.get(
+        f"{VK_API}photos.get",
+        params={
+            "owner_id":    owner_id,
+            "album_id":    album_id,
+            "count":       1000,
+            "photo_sizes": 1,
+            "v":           VK_API_VERSION,
+            "access_token": vk_token,
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    if "error" in data:
+        err = data["error"]
+        raise ValueError(
+            f"VK API вернул ошибку {err['error_code']}: {err['error_msg']}"
+        )
+
+    items = data.get("response", {}).get("items", [])
+    if not items:
+        raise ValueError("Альбом пуст или недоступен")
+
+    logger.info("Found %d photo(s) in VK album", len(items))
+
+    result: list[bytes] = []
+    for i, item in enumerate(items):
+        sizes = item.get("sizes", [])
+        if not sizes:
+            logger.warning("Photo %d has no sizes, skipping", i)
+            continue
+
+        # Pick the largest available size by pixel area
+        best = max(sizes, key=lambda s: s.get("width", 0) * s.get("height", 0))
+        url = best.get("url")
+        if not url:
+            continue
+
+        try:
+            photo_resp = requests.get(url, timeout=30)
+            photo_resp.raise_for_status()
+            result.append(photo_resp.content)
+        except Exception as exc:
+            logger.warning("Failed to download photo %d (%s): %s", i, url, exc)
+
+    logger.info("Downloaded %d/%d photo(s) from VK album", len(result), len(items))
+    return result
