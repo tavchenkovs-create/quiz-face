@@ -397,23 +397,11 @@ async def check_photos(
 @router.get("/progress/{task_id}")
 def get_progress(task_id: str):
     with tasks_lock:
-        state = tasks.get(task_id)
+        if task_id not in tasks:
+            raise HTTPException(status_code=404, detail="Task not found")
+        state = dict(tasks[task_id])
 
-    if state is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    payload: dict = {
-        "processed":   state["processed"],
-        "total":       state["total"],
-        "faces_found": state["faces_found"],
-        "done":        bool(state.get("done")),
-    }
-    if state.get("total_photos") is not None:
-        payload["total_photos"] = state["total_photos"]
-    if state.get("error"):
-        payload["error"] = state["error"]
-
-    return JSONResponse(payload)
+    return JSONResponse(state)
 
 
 # ---------------------------------------------------------------------------
