@@ -13,10 +13,14 @@ export default function BatchPanel({ onRefresh }) {
   const [allDone, setAllDone]           = useState(false)
   const [error, setError]               = useState(null)
 
-  const intervalRef      = useRef(null)
-  const loadingStartsRef = useRef({})   // validIdx → Date.now() when loading started
+  const intervalRef = useRef(null)
+  const timerRef    = useRef(null)
+  const [, setTick] = useState(0)   // forces re-render every second for live loading elapsed
 
-  useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current) }, [])
+  useEffect(() => () => {
+    if (intervalRef.current) clearInterval(intervalRef.current)
+    if (timerRef.current)    clearInterval(timerRef.current)
+  }, [])
 
   const handleParse = () => {
     const lines = pasteText.trim().split('\n').filter(l => l.trim())
@@ -32,7 +36,6 @@ export default function BatchPanel({ onRefresh }) {
     setOverallDone(0)
     setOverallTotal(0)
     setError(null)
-    loadingStartsRef.current = {}
   }
 
   const handleReset = () => {
@@ -50,8 +53,7 @@ export default function BatchPanel({ onRefresh }) {
     setRunning(true)
     setAllDone(false)
     setError(null)
-    loadingStartsRef.current = {}
-    setItems(prev => prev.map(it => it.parseError ? it : { ...it, status: 'pending', elapsed: undefined }))
+    setItems(prev => prev.map(it => it.parseError ? it : { ...it, status: 'pending', elapsed: undefined, loadingStart: undefined }))
 
     try {
       const data = await uploadBatch(validItems.map(it => ({
@@ -63,6 +65,13 @@ export default function BatchPanel({ onRefresh }) {
 
       const taskId = data.task_id
       let failures = 0
+
+      timerRef.current = setInterval(() => setTick(t => t + 1), 1000)
+
+      const stopAll = () => {
+        clearInterval(intervalRef.current); intervalRef.current = null
+        clearInterval(timerRef.current);    timerRef.current    = null
+      }
 
       intervalRef.current = setInterval(async () => {
         try {
@@ -82,19 +91,21 @@ export default function BatchPanel({ onRefresh }) {
               if (next[i].parseError) continue
 
               if (validIdx < results.length) {
-                const r         = results[validIdx]
-                const startTime = loadingStartsRef.current[validIdx]
-                const elapsed   = startTime ? Math.round((Date.now() - startTime) / 1000) : 0
-                next[i] = { ...next[i], status: r.status, result: r, elapsed }
-              } else if (currentAlbum > 0 && validIdx === currentAlbum - 1) {
-                if (!loadingStartsRef.current[validIdx]) {
-                  loadingStartsRef.current[validIdx] = Date.now()
+                const r = results[validIdx]
+                // Only freeze elapsed on the first transition to done/error
+                if (next[i].status !== 'done' && next[i].status !== 'error') {
+                  const elapsed = next[i].loadingStart
+                    ? Math.round((Date.now() - next[i].loadingStart) / 1000)
+                    : 0
+                  next[i] = { ...next[i], status: r.status, result: r, elapsed }
                 }
+              } else if (currentAlbum > 0 && validIdx === currentAlbum - 1) {
                 next[i] = {
                   ...next[i],
-                  status:         'loading',
-                  currentFaces:   prog.current_faces  || 0,
-                  currentPhotos:  prog.current_photos || 0,
+                  status:        'loading',
+                  loadingStart:  next[i].loadingStart ?? Date.now(),
+                  currentFaces:  prog.current_faces  || 0,
+                  currentPhotos: prog.current_photos || 0,
                 }
               } else {
                 next[i] = { ...next[i], status: 'pending' }
@@ -110,8 +121,7 @@ export default function BatchPanel({ onRefresh }) {
           setOverallTotal(prog.total_albums || validItems.length)
 
           if (prog.done) {
-            clearInterval(intervalRef.current)
-            intervalRef.current = null
+            stopAll()
             setRunning(false)
             setAllDone(true)
             onRefresh()
@@ -119,8 +129,7 @@ export default function BatchPanel({ onRefresh }) {
         } catch {
           failures++
           if (failures >= 3) {
-            clearInterval(intervalRef.current)
-            intervalRef.current = null
+            stopAll()
             setError('Потеряно соединение с сервером')
             setRunning(false)
           }
@@ -255,12 +264,16 @@ function BatchStatus({ item }) {
   switch (item.status) {
     case 'pending':
       return <span className="batch-status batch-status--muted">Ожидает</span>
-    case 'loading':
+    case 'loading': {
+      const liveElapsed = item.loadingStart
+        ? Math.round((Date.now() - item.loadingStart) / 1000)
+        : 0
       return (
         <span className="batch-status batch-status--active">
-          Загружается… ({item.currentPhotos} фото, {item.currentFaces} лиц)
+          Загружается… {fmtTime(liveElapsed)} ({item.currentPhotos} фото, {item.currentFaces} лиц)
         </span>
       )
+    }
     case 'done':
       return (
         <span className="batch-status batch-status--done">
