@@ -4,7 +4,6 @@ import threading
 import uuid as uuid_module
 from datetime import date as date_type
 
-import requests as http_requests
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
@@ -21,7 +20,7 @@ from .services import (
     load_all_quiz_faces,
 )
 from .task_store import tasks, tasks_lock
-from .vk import get_album_photo_urls
+from .vk import download_photos, get_album_photo_urls
 
 logger = logging.getLogger(__name__)
 
@@ -123,23 +122,17 @@ def _run_vk_bg(
         with tasks_lock:
             tasks[task_id]["total"] = len(urls)
 
-        # Step 2: create quiz/game before downloading
+        # Step 2: download all photos in parallel
+        raw = download_photos(urls)
+        logger.info("Downloaded %d/%d VK photo(s)", sum(1 for b in raw if b), len(urls))
+
+        # Step 3: create quiz/game, then process photos sequentially
         quiz = get_or_create_quiz(db, quiz_name)
         game = get_or_create_game(db, quiz.id, game_date)
         db.commit()
 
-        # Step 3: download and process photos sequentially
         faces_found = 0
-        processed = 0
-        for i, url in enumerate(urls):
-            image_data: bytes | None = None
-            try:
-                r = http_requests.get(url, timeout=10)
-                r.raise_for_status()
-                image_data = r.content
-            except Exception as exc:
-                logger.warning("Failed to download VK photo %d (%s): %s", i + 1, url, exc)
-
+        for i, image_data in enumerate(raw):
             if image_data:
                 face_results: list[dict] = []
                 try:
@@ -154,10 +147,9 @@ def _run_vk_bg(
                     except Exception: pass
                 faces_found += len(face_results)
 
-            processed += 1
             with tasks_lock:
                 t = tasks[task_id]
-                t["processed"] = processed
+                t["processed"] = i + 1
                 t["faces_found"] = faces_found
 
         with tasks_lock:

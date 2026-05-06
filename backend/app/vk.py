@@ -1,5 +1,6 @@
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -70,6 +71,24 @@ def get_album_photo_urls(album_url: str, vk_token: str) -> list[str]:
 
     logger.info("Found %d photo URL(s) in VK album", len(urls))
     return urls
+
+
+def download_photos(urls: list[str], max_workers: int = 10, timeout: int = 15) -> list[bytes | None]:
+    """
+    Download photos in parallel.
+    Returns a list in the same order as urls; None for any photo that failed to download.
+    """
+    def _fetch(url: str) -> bytes | None:
+        try:
+            r = requests.get(url, timeout=timeout)
+            r.raise_for_status()
+            return r.content
+        except Exception as exc:
+            logger.warning("Failed to download %s: %s", url, exc)
+            return None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return list(executor.map(_fetch, urls))
 
 
 def get_album_photos(album_url: str, vk_token: str) -> list[bytes]:
