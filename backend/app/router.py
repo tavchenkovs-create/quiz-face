@@ -5,7 +5,6 @@ import os
 import threading
 import time
 import uuid as uuid_module
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date as date_type
 
 import requests as http_requests
@@ -59,28 +58,24 @@ def _process_images_bg(
     game_id: int,
     db,
 ) -> None:
-    """
-    Parallel face detection (ThreadPoolExecutor, max 4 workers) +
-    sequential DB writes. Updates task progress after each photo.
-    """
-    def _detect(item: tuple[bytes, str]):
-        data, name = item
-        return extract_faces_parallel(data, name, game_id, UPLOADS_DIR, FACE_DETECTION_MODEL)
+    """Sequential face detection: one photo at a time, commit after each."""
+    for image_data, filename in images:
+        face_results: list[dict] = []
+        try:
+            orig_path, face_results = extract_faces_parallel(
+                image_data, filename, game_id, UPLOADS_DIR, FACE_DETECTION_MODEL
+            )
+            _save_faces_to_db(db, game_id, orig_path, face_results)
+            db.commit()
+        except Exception:
+            logger.exception("Error processing image %r", filename)
+            try: db.rollback()
+            except Exception: pass
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = {executor.submit(_detect, img): img for img in images}
-        for future in as_completed(futures):
-            face_results: list[dict] = []
-            try:
-                orig_path, face_results = future.result()
-                _save_faces_to_db(db, game_id, orig_path, face_results)
-            except Exception:
-                logger.exception("Error processing image in background task")
-
-            with tasks_lock:
-                t = tasks[task_id]
-                t["processed"] += 1
-                t["faces_found"] += len(face_results)
+        with tasks_lock:
+            t = tasks[task_id]
+            t["processed"] += 1
+            t["faces_found"] += len(face_results)
 
 
 def _run_files_bg(
@@ -98,7 +93,6 @@ def _run_files_bg(
 
         _process_images_bg(task_id, images, game.id, db)
 
-        db.commit()
         with tasks_lock:
             tasks[task_id].update({"done": True, "total_photos": len(images)})
         logger.info("Files task %s done: %d photos, %d faces", task_id, len(images), tasks[task_id]["faces_found"])
@@ -133,32 +127,46 @@ def _run_vk_bg(
         with tasks_lock:
             tasks[task_id]["total"] = len(urls)
 
-        # Step 2: download photos in parallel (10 workers)
-        def _download(url: str) -> bytes | None:
-            try:
-                r = http_requests.get(url, timeout=30)
-                r.raise_for_status()
-                return r.content
-            except Exception as exc:
-                logger.warning("Failed to download %s: %s", url, exc)
-                return None
-
-        with ThreadPoolExecutor(max_workers=5) as dl_ex:
-            raw = list(dl_ex.map(_download, urls))
-
-        images = [(data, f"vk_{i+1}.jpg") for i, data in enumerate(raw) if data is not None]
-
-        # Step 3: create quiz/game, then process
+        # Step 2: create quiz/game before downloading
         quiz = get_or_create_quiz(db, quiz_name)
         game = get_or_create_game(db, quiz.id, game_date)
         db.commit()
 
-        _process_images_bg(task_id, images, game.id, db)
+        # Step 3: download and process photos sequentially
+        faces_found = 0
+        processed = 0
+        for i, url in enumerate(urls):
+            image_data: bytes | None = None
+            try:
+                r = http_requests.get(url, timeout=10)
+                r.raise_for_status()
+                image_data = r.content
+            except Exception as exc:
+                logger.warning("Failed to download VK photo %d (%s): %s", i + 1, url, exc)
 
-        db.commit()
+            if image_data:
+                face_results: list[dict] = []
+                try:
+                    orig_path, face_results = extract_faces_parallel(
+                        image_data, f"vk_{i+1}.jpg", game.id, UPLOADS_DIR, FACE_DETECTION_MODEL
+                    )
+                    _save_faces_to_db(db, game.id, orig_path, face_results)
+                    db.commit()
+                except Exception:
+                    logger.exception("Error processing VK photo %d", i + 1)
+                    try: db.rollback()
+                    except Exception: pass
+                faces_found += len(face_results)
+
+            processed += 1
+            with tasks_lock:
+                t = tasks[task_id]
+                t["processed"] = processed
+                t["faces_found"] = faces_found
+
         with tasks_lock:
-            tasks[task_id].update({"done": True, "total_photos": len(images)})
-        logger.info("VK task %s done: %d photos, %d faces", task_id, len(images), tasks[task_id]["faces_found"])
+            tasks[task_id].update({"done": True, "total_photos": len(urls)})
+        logger.info("VK task %s done: %d photos, %d faces", task_id, len(urls), tasks[task_id]["faces_found"])
 
     except Exception as exc:
         logger.exception("VK background task %s failed", task_id)
