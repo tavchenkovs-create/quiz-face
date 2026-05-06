@@ -1,17 +1,13 @@
-import asyncio
-import json
 import logging
 import os
 import threading
-import time
 import uuid as uuid_module
 from datetime import date as date_type
 
 import requests as http_requests
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
-from sse_starlette.sse import EventSourceResponse
 
 from .config import FACE_DETECTION_MODEL, FACE_TOLERANCE, UPLOADS_DIR, VK_SERVICE_KEY
 from .database import SessionLocal, get_db
@@ -295,54 +291,29 @@ async def check_photos(
 
 
 # ---------------------------------------------------------------------------
-# GET /progress/{task_id}  — SSE stream прогресса
+# GET /progress/{task_id}  — polling endpoint
 # ---------------------------------------------------------------------------
 
 @router.get("/progress/{task_id}")
-async def stream_progress(task_id: str):
-    start = time.monotonic()
+def get_progress(task_id: str):
+    with tasks_lock:
+        state = tasks.get(task_id)
 
-    async def generator():
-        last_ping = time.monotonic()
-        while True:
-            # Timeout after 10 minutes
-            if time.monotonic() - start > 600:
-                yield json.dumps({"error": "Timeout", "done": True})
-                return
+    if state is None:
+        raise HTTPException(status_code=404, detail="Task not found")
 
-            with tasks_lock:
-                state = tasks.get(task_id)
+    payload: dict = {
+        "processed":   state["processed"],
+        "total":       state["total"],
+        "faces_found": state["faces_found"],
+        "done":        bool(state.get("done")),
+    }
+    if state.get("total_photos") is not None:
+        payload["total_photos"] = state["total_photos"]
+    if state.get("error"):
+        payload["error"] = state["error"]
 
-            if state is None:
-                if time.monotonic() - start > 5:
-                    yield json.dumps({"error": "Task not found"})
-                    return
-                await asyncio.sleep(0.2)
-                continue
-
-            payload: dict = {
-                "processed":   state["processed"],
-                "total":       state["total"],
-                "faces_found": state["faces_found"],
-            }
-            if state.get("done"):
-                payload["done"] = True
-                payload["total_photos"] = state.get("total_photos", state["total"])
-            if state.get("error"):
-                payload["error"] = state["error"]
-
-            yield json.dumps(payload)
-
-            if state.get("done") or state.get("error"):
-                return
-
-            await asyncio.sleep(0.5)
-
-            if time.monotonic() - last_ping > 15:
-                yield json.dumps({"ping": True})
-                last_ping = time.monotonic()
-
-    return EventSourceResponse(generator())
+    return JSONResponse(payload)
 
 
 # ---------------------------------------------------------------------------

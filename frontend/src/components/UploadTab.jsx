@@ -16,10 +16,10 @@ export default function UploadTab({ quizzes, onRefresh }) {
   const [saved, setSaved]           = useState(null)    // final result
   const [error, setError]           = useState(null)
 
-  const esRef = useRef(null)
+  const intervalRef = useRef(null)
 
-  // Clean up EventSource on unmount
-  useEffect(() => () => esRef.current?.close(), [])
+  // Clean up polling interval on unmount
+  useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current) }, [])
 
   const isProcessing = progress !== null
 
@@ -29,43 +29,47 @@ export default function UploadTab({ quizzes, onRefresh }) {
 
   const handleSourceChange = (val) => { setSource(val); setError(null); setSaved(null) }
 
-  const connectProgress = (taskId) => {
-    const es = new EventSource(getProgressUrl(taskId))
-    esRef.current = es
+  const startPolling = (taskId) => {
     setProgress({ processed: 0, total: 0, facesFound: 0 })
+    let failures = 0
 
-    es.onmessage = (e) => {
-      const data = JSON.parse(e.data)
-      if (data.ping) return
+    intervalRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(getProgressUrl(taskId))
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        failures = 0
 
-      setProgress({
-        processed:  data.processed,
-        total:      data.total,
-        facesFound: data.faces_found,
-      })
+        setProgress({
+          processed:  data.processed,
+          total:      data.total,
+          facesFound: data.faces_found,
+        })
 
-      if (data.error) {
-        es.close()
-        esRef.current = null
-        setError(data.error)
-        setProgress(null)
-        return
+        if (data.error) {
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+          setError(data.error)
+          setProgress(null)
+          return
+        }
+
+        if (data.done) {
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+          setSaved({ total_faces_found: data.faces_found, total_photos: data.total_photos ?? data.total })
+          setProgress(null)
+        }
+      } catch {
+        failures += 1
+        if (failures >= 3) {
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+          setError('Потеряно соединение с сервером во время обработки')
+          setProgress(null)
+        }
       }
-
-      if (data.done) {
-        es.close()
-        esRef.current = null
-        setSaved({ total_faces_found: data.faces_found, total_photos: data.total_photos ?? data.total })
-        setProgress(null)
-      }
-    }
-
-    es.onerror = () => {
-      es.close()
-      esRef.current = null
-      setError('Потеряно соединение с сервером во время обработки')
-      setProgress(null)
-    }
+    }, 2000)
   }
 
   const handleSubmit = async (e) => {
@@ -88,7 +92,7 @@ export default function UploadTab({ quizzes, onRefresh }) {
         data = await uploadFromVk({ quizName: effectiveQuizName, gameDate, albumUrl: vkUrl.trim() })
       }
       onRefresh()
-      connectProgress(data.task_id)
+      startPolling(data.task_id)
     } catch (err) {
       setError(err.message)
     } finally {
