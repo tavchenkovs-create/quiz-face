@@ -27,6 +27,51 @@ def _parse_album_url(url: str) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def get_album_photo_urls(album_url: str, vk_token: str) -> list[str]:
+    """
+    Return a list of max-size photo URLs from a VK album (fast — one API call, no downloading).
+    Raises ValueError on bad URL or API error.
+    """
+    owner_id, album_id = _parse_album_url(album_url)
+    logger.info("Fetching VK album owner_id=%d album_id=%d", owner_id, album_id)
+
+    resp = requests.get(
+        f"{VK_API}photos.get",
+        params={
+            "owner_id":     owner_id,
+            "album_id":     album_id,
+            "count":        1000,
+            "photo_sizes":  1,
+            "v":            VK_API_VERSION,
+            "access_token": vk_token,
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    if "error" in data:
+        err = data["error"]
+        raise ValueError(f"VK API вернул ошибку {err['error_code']}: {err['error_msg']}")
+
+    items = data.get("response", {}).get("items", [])
+    if not items:
+        raise ValueError("Альбом пуст или недоступен")
+
+    urls: list[str] = []
+    for item in items:
+        sizes = item.get("sizes", [])
+        if not sizes:
+            continue
+        best = max(sizes, key=lambda s: s.get("width", 0) * s.get("height", 0))
+        url = best.get("url")
+        if url:
+            urls.append(url)
+
+    logger.info("Found %d photo URL(s) in VK album", len(urls))
+    return urls
+
+
 def get_album_photos(album_url: str, vk_token: str) -> list[bytes]:
     """
     Fetch all photos from a public VK album and return them as a list of bytes.

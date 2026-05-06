@@ -24,6 +24,10 @@ class CheckResult(BaseModel):
     cheaters: list[FaceMatch]
 
 
+class TaskResponse(BaseModel):
+    task_id: str
+
+
 class VkUploadRequest(BaseModel):
     album_url: str
     quiz_name: str

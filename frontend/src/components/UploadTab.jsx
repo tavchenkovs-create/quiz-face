@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { uploadPhotos, uploadFromVk } from '../api'
+import { useState, useRef, useEffect } from 'react'
+import { uploadPhotos, uploadFromVk, getProgressUrl } from '../api'
 import DropZone from './DropZone'
+import ProgressBar from './ProgressBar'
 
 export default function UploadTab({ quizzes, onRefresh }) {
   const [selectedQuiz, setSelectedQuiz] = useState('')
@@ -9,18 +10,61 @@ export default function UploadTab({ quizzes, onRefresh }) {
   const [source, setSource]             = useState('files')  // 'files' | 'vk'
   const [files, setFiles]               = useState([])
   const [vkUrl, setVkUrl]               = useState('')
-  const [loading, setLoading]           = useState(false)
-  const [error, setError]               = useState(null)
-  const [saved, setSaved]               = useState(null)
+
+  const [loading, setLoading]       = useState(false)   // waiting for initial POST
+  const [progress, setProgress]     = useState(null)    // { processed, total, facesFound }
+  const [saved, setSaved]           = useState(null)    // final result
+  const [error, setError]           = useState(null)
+
+  const esRef = useRef(null)
+
+  // Clean up EventSource on unmount
+  useEffect(() => () => esRef.current?.close(), [])
+
+  const isProcessing = progress !== null
 
   const handleSelectChange  = (e) => { setSelectedQuiz(e.target.value); setNewQuizName('') }
   const handleNewNameChange = (e) => { setNewQuizName(e.target.value); setSelectedQuiz('') }
   const effectiveQuizName   = newQuizName.trim() || selectedQuiz
 
-  const handleSourceChange = (val) => {
-    setSource(val)
-    setError(null)
-    setSaved(null)
+  const handleSourceChange = (val) => { setSource(val); setError(null); setSaved(null) }
+
+  const connectProgress = (taskId) => {
+    const es = new EventSource(getProgressUrl(taskId))
+    esRef.current = es
+    setProgress({ processed: 0, total: 0, facesFound: 0 })
+
+    es.onmessage = (e) => {
+      const data = JSON.parse(e.data)
+
+      setProgress({
+        processed:  data.processed,
+        total:      data.total,
+        facesFound: data.faces_found,
+      })
+
+      if (data.error) {
+        es.close()
+        esRef.current = null
+        setError(data.error)
+        setProgress(null)
+        return
+      }
+
+      if (data.done) {
+        es.close()
+        esRef.current = null
+        setSaved({ total_faces_found: data.faces_found, total_photos: data.total_photos ?? data.total })
+        setProgress(null)
+      }
+    }
+
+    es.onerror = () => {
+      es.close()
+      esRef.current = null
+      setError('Потеряно соединение с сервером во время обработки')
+      setProgress(null)
+    }
   }
 
   const handleSubmit = async (e) => {
@@ -30,12 +74,8 @@ export default function UploadTab({ quizzes, onRefresh }) {
 
     if (!effectiveQuizName) { setError('Укажите название квиза'); return }
     if (!gameDate)           { setError('Укажите дату игры'); return }
-
-    if (source === 'files') {
-      if (!files.length) { setError('Добавьте хотя бы одну фотографию'); return }
-    } else {
-      if (!vkUrl.trim()) { setError('Введите ссылку на альбом ВКонтакте'); return }
-    }
+    if (source === 'files' && !files.length) { setError('Добавьте хотя бы одну фотографию'); return }
+    if (source === 'vk'    && !vkUrl.trim()) { setError('Введите ссылку на альбом ВКонтакте'); return }
 
     setLoading(true)
     try {
@@ -46,16 +86,14 @@ export default function UploadTab({ quizzes, onRefresh }) {
       } else {
         data = await uploadFromVk({ quizName: effectiveQuizName, gameDate, albumUrl: vkUrl.trim() })
       }
-      setSaved(data)
       onRefresh()
+      connectProgress(data.task_id)
     } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
     }
   }
-
-  const loadingText = source === 'vk' ? 'Загружаем из ВКонтакте…' : 'Сохраняем…'
 
   return (
     <form onSubmit={handleSubmit} noValidate>
@@ -72,6 +110,14 @@ export default function UploadTab({ quizzes, onRefresh }) {
           Сохранено. Найдено лиц: {saved.total_faces_found}
           {saved.total_photos != null && ` (из ${saved.total_photos} фото)`}
         </div>
+      )}
+
+      {isProcessing && (
+        <ProgressBar
+          processed={progress.processed}
+          total={progress.total}
+          facesFound={progress.facesFound}
+        />
       )}
 
       <div className="form-group">
@@ -137,10 +183,12 @@ export default function UploadTab({ quizzes, onRefresh }) {
         )}
       </div>
 
-      <button type="submit" className="btn-submit" disabled={loading}>
+      <button type="submit" className="btn-submit" disabled={loading || isProcessing}>
         {loading
-          ? <><span className="spinner" aria-hidden="true" /> {loadingText}</>
-          : 'Сохранить в базу'
+          ? <><span className="spinner" aria-hidden="true" /> Отправляем…</>
+          : isProcessing
+            ? <><span className="spinner" aria-hidden="true" /> Обрабатываем…</>
+            : 'Сохранить в базу'
         }
       </button>
     </form>

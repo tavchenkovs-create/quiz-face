@@ -6,6 +6,7 @@ export async function fetchQuizzes() {
   return res.json()
 }
 
+// Returns { task_id }
 export async function uploadPhotos({ files, quizName, gameDate }) {
   const form = new FormData()
   form.append('quiz_name', quizName)
@@ -21,6 +22,7 @@ export async function uploadPhotos({ files, quizName, gameDate }) {
   return res.json()
 }
 
+// Returns { task_id }
 export async function uploadFromVk({ quizName, gameDate, albumUrl }) {
   const res = await fetch(`${BASE_URL}/upload-from-vk`, {
     method: 'POST',
@@ -47,4 +49,8 @@ export async function checkPhotos({ files, quizName }) {
     throw new Error(detail)
   }
   return res.json()
+}
+
+export function getProgressUrl(taskId) {
+  return `${BASE_URL}/progress/${taskId}`
 }

@@ -167,6 +167,73 @@ def process_photo(
 
 
 # ---------------------------------------------------------------------------
+# Parallel-safe photo processing (no DB access)
+# ---------------------------------------------------------------------------
+
+def extract_faces_parallel(
+    image_data: bytes,
+    filename: str,
+    game_id: int,
+    uploads_dir: str,
+    detection_model: str = "hog",
+) -> tuple[str, list[dict]]:
+    """
+    Save original + detect faces + save crops — no DB access.
+    Safe to call from multiple threads concurrently.
+    Returns (original_relative_path, [{face_image_filename, encoding_bytes}]).
+    """
+    originals_dir = os.path.join(uploads_dir, "originals", str(game_id))
+    os.makedirs(originals_dir, exist_ok=True)
+    safe_name = f"{uuid.uuid4()}_{os.path.basename(filename)}"
+    with open(os.path.join(originals_dir, safe_name), "wb") as fh:
+        fh.write(image_data)
+    original_relative = f"originals/{game_id}/{safe_name}"
+
+    try:
+        pil_image = ImageOps.exif_transpose(Image.open(BytesIO(image_data)).convert("RGB"))
+    except Exception as exc:
+        logger.warning("Cannot open %r: %s", filename, exc)
+        return original_relative, []
+
+    np_image = np.array(pil_image)
+    logger.info("Processing %r (%dx%d)", filename, np_image.shape[1], np_image.shape[0])
+
+    try:
+        locations = face_recognition.face_locations(np_image, model=detection_model)
+    except Exception as exc:
+        logger.warning("face_locations failed for %r: %s", filename, exc)
+        return original_relative, []
+
+    if not locations:
+        logger.info("No faces in %r", filename)
+        return original_relative, []
+
+    try:
+        encodings = face_recognition.face_encodings(np_image, locations)
+    except Exception as exc:
+        logger.warning("face_encodings failed for %r: %s", filename, exc)
+        return original_relative, []
+
+    faces_dir = os.path.join(uploads_dir, "faces", str(game_id))
+    os.makedirs(faces_dir, exist_ok=True)
+
+    results: list[dict] = []
+    for (top, right, bottom, left), encoding in zip(locations, encodings):
+        pad = 20
+        h, w = np_image.shape[:2]
+        crop = pil_image.crop((max(0,left-pad), max(0,top-pad), min(w,right+pad), min(h,bottom+pad)))
+        face_filename = f"{uuid.uuid4()}.jpg"
+        crop.save(os.path.join(faces_dir, face_filename), "JPEG", quality=90)
+        results.append({
+            "face_image_filename": f"{game_id}/{face_filename}",
+            "encoding_bytes": encoding.tobytes(),
+        })
+
+    logger.info("Extracted %d face(s) from %r", len(results), filename)
+    return original_relative, results
+
+
+# ---------------------------------------------------------------------------
 # Face matching
 # ---------------------------------------------------------------------------
 
