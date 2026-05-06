@@ -36,6 +36,7 @@ export default function UploadTab({ quizzes, onRefresh }) {
 
     es.onmessage = (e) => {
       const data = JSON.parse(e.data)
+      if (data.ping) return
 
       setProgress({
         processed:  data.processed,

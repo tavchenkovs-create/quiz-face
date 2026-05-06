@@ -295,6 +295,7 @@ async def stream_progress(task_id: str):
     start = time.monotonic()
 
     async def generator():
+        last_ping = time.monotonic()
         while True:
             # Timeout after 10 minutes
             if time.monotonic() - start > 600:
@@ -328,6 +329,10 @@ async def stream_progress(task_id: str):
                 return
 
             await asyncio.sleep(0.5)
+
+            if time.monotonic() - last_ping > 15:
+                yield json.dumps({"ping": True})
+                last_ping = time.monotonic()
 
     return EventSourceResponse(generator())
 
