@@ -381,6 +381,99 @@ body {
   font-size: .9375rem;
 }
 
+/* ─── Batch upload ───────────────────────────────────────────────────────── */
+.form-textarea {
+  width: 100%;
+  padding: .75rem .875rem;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: .9375rem;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  resize: vertical;
+  transition: border-color .15s, box-shadow .15s;
+  margin-bottom: .75rem;
+}
+.form-textarea:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(59,130,246,.12);
+}
+
+.btn-parse {
+  height: 2.5rem;
+  padding: 0 1.25rem;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: .9375rem;
+  font-weight: 600;
+  color: var(--text);
+  transition: border-color .15s, background .15s;
+}
+.btn-parse:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.btn-parse:disabled { opacity: .5; cursor: not-allowed; }
+
+.batch-hint {
+  font-size: .875rem;
+  color: var(--muted);
+  margin-bottom: .875rem;
+  line-height: 1.5;
+}
+.batch-hint--warn { color: var(--error); margin-top: .5rem; }
+
+.batch-progress {
+  background: #eff6ff;
+  border: 1.5px solid #bfdbfe;
+  border-radius: 8px;
+  padding: .625rem 1rem;
+  font-size: .9375rem;
+  font-weight: 600;
+  color: #1d4ed8;
+  margin-bottom: 1rem;
+}
+
+.batch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .875rem;
+  margin-bottom: 1rem;
+}
+.batch-table th {
+  text-align: left;
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+  padding: .5rem .625rem;
+  border-bottom: 2px solid var(--border);
+}
+.batch-table td {
+  padding: .5rem .625rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.batch-row--active { background: #eff6ff; }
+.batch-row--error  { background: var(--error-bg); }
+.batch-cell--raw   { color: var(--muted); font-style: italic; }
+.batch-cell--url a { color: var(--primary); text-decoration: none; font-size: .8125rem; word-break: break-all; }
+.batch-cell--url a:hover { text-decoration: underline; }
+
+.batch-status              { font-size: .8125rem; font-weight: 500; }
+.batch-status--muted       { color: var(--muted); }
+.batch-status--active      { color: #1d4ed8; }
+.batch-status--done        { color: var(--success); }
+.batch-status--error       { color: var(--error); }
+
+.batch-actions {
+  display: flex;
+  gap: .75rem;
+  align-items: center;
+  margin-top: .25rem;
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 540px) {
   .app-header__sub { display: none; }

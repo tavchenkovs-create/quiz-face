@@ -51,6 +51,21 @@ export async function checkPhotos({ files, quizName }) {
   return res.json()
 }
 
+// Returns { task_id }
+export async function uploadBatch(items) {
+  const res = await fetch(`${BASE_URL}/upload-batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  })
+  if (!res.ok) {
+    let detail = `Ошибка сервера (${res.status})`
+    try { const b = await res.json(); if (b.detail) detail = b.detail } catch (_) {}
+    throw new Error(detail)
+  }
+  return res.json()
+}
+
 export function getProgressUrl(taskId) {
   return `${BASE_URL}/progress/${taskId}`
 }

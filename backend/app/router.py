@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .config import FACE_DETECTION_MODEL, FACE_TOLERANCE, UPLOADS_DIR, VK_SERVICE_KEY
 from .database import SessionLocal, get_db
 from .models import FaceEncoding, Photo, Quiz
-from .schemas import CheckResult, FaceMatch, QuizOut, TaskResponse, VkUploadRequest
+from .schemas import BatchUploadRequest, CheckResult, FaceMatch, QuizOut, TaskResponse, VkUploadRequest
 from .services import (
     check_faces_from_images,
     extract_faces_parallel,
@@ -167,6 +167,92 @@ def _run_vk_bg(
 
 
 # ---------------------------------------------------------------------------
+# Batch background helper
+# ---------------------------------------------------------------------------
+
+def _run_batch_bg(task_id: str, items: list[dict]) -> None:
+    """Background thread for POST /upload-batch. Processes albums sequentially."""
+    with tasks_lock:
+        tasks[task_id].update({
+            "total_albums":       len(items),
+            "current_album":      0,
+            "current_album_name": "",
+            "current_faces":      0,
+            "current_photos":     0,
+            "results":            [],
+        })
+
+    for i, item in enumerate(items):
+        quiz_name  = item["quiz_name"]
+        album_url  = item["album_url"]
+        game_date_str = item["game_date"]
+
+        with tasks_lock:
+            tasks[task_id].update({
+                "current_album":      i + 1,
+                "current_album_name": quiz_name,
+                "current_faces":      0,
+                "current_photos":     0,
+            })
+
+        db = SessionLocal()
+        try:
+            game_date = date_type.fromisoformat(game_date_str)
+
+            urls = get_album_photo_urls(album_url, VK_SERVICE_KEY)
+            raw  = download_photos(urls)
+
+            quiz = get_or_create_quiz(db, quiz_name)
+            game = get_or_create_game(db, quiz.id, game_date)
+            db.commit()
+
+            faces_found = 0
+            for j, image_data in enumerate(raw):
+                if image_data:
+                    face_results: list[dict] = []
+                    try:
+                        orig_path, face_results = extract_faces_parallel(
+                            image_data, f"vk_{j+1}.jpg", game.id, UPLOADS_DIR, FACE_DETECTION_MODEL
+                        )
+                        _save_faces_to_db(db, game.id, orig_path, face_results)
+                        db.commit()
+                    except Exception:
+                        logger.exception("Batch %s: error processing photo %d of album %d", task_id, j + 1, i + 1)
+                        try: db.rollback()
+                        except Exception: pass
+                    faces_found += len(face_results)
+
+                with tasks_lock:
+                    tasks[task_id].update({"current_faces": faces_found, "current_photos": j + 1})
+
+            with tasks_lock:
+                tasks[task_id]["results"].append({
+                    "quiz_name": quiz_name,
+                    "faces":     faces_found,
+                    "photos":    len(urls),
+                    "status":    "done",
+                })
+            logger.info("Batch %s: album %d/%d done (%d faces)", task_id, i + 1, len(items), faces_found)
+
+        except Exception as exc:
+            logger.exception("Batch %s: album %d failed", task_id, i + 1)
+            try: db.rollback()
+            except Exception: pass
+            with tasks_lock:
+                tasks[task_id]["results"].append({
+                    "quiz_name": quiz_name,
+                    "status":    "error",
+                    "error":     str(exc),
+                })
+        finally:
+            db.close()
+
+    with tasks_lock:
+        tasks[task_id]["done"] = True
+    logger.info("Batch task %s done: %d albums", task_id, len(items))
+
+
+# ---------------------------------------------------------------------------
 # GET /quizzes
 # ---------------------------------------------------------------------------
 
@@ -236,6 +322,28 @@ async def upload_from_vk(body: VkUploadRequest):
         args=(task_id, body.album_url, body.quiz_name.strip(), game_date),
         daemon=True,
     )
+    t.start()
+    return TaskResponse(task_id=task_id)
+
+
+# ---------------------------------------------------------------------------
+# POST /upload-batch  — пакетная загрузка нескольких альбомов ВК
+# ---------------------------------------------------------------------------
+
+@router.post("/upload-batch", response_model=TaskResponse)
+async def upload_batch(body: BatchUploadRequest):
+    if not VK_SERVICE_KEY:
+        raise HTTPException(status_code=503, detail="VK_SERVICE_KEY не задан на сервере")
+    if not body.items:
+        raise HTTPException(status_code=400, detail="Список альбомов пуст")
+
+    items = [{"quiz_name": it.quiz_name.strip(), "game_date": it.game_date, "album_url": it.album_url} for it in body.items]
+
+    task_id = str(uuid_module.uuid4())
+    with tasks_lock:
+        tasks[task_id] = {"total_albums": len(items), "current_album": 0, "results": [], "done": False}
+
+    t = threading.Thread(target=_run_batch_bg, args=(task_id, items), daemon=True)
     t.start()
     return TaskResponse(task_id=task_id)
 

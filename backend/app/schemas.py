@@ -34,6 +34,16 @@ class VkUploadRequest(BaseModel):
     game_date: str  # YYYY-MM-DD
 
 
+class BatchItem(BaseModel):
+    quiz_name: str
+    game_date: str  # YYYY-MM-DD
+    album_url: str
+
+
+class BatchUploadRequest(BaseModel):
+    items: list[BatchItem]
+
+
 class VkUploadResult(BaseModel):
     total_faces_found: int
     total_photos: int

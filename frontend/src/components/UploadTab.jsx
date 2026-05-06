@@ -2,8 +2,11 @@ import { useState, useRef, useEffect } from 'react'
 import { uploadPhotos, uploadFromVk, getProgressUrl } from '../api'
 import DropZone from './DropZone'
 import ProgressBar from './ProgressBar'
+import BatchPanel from './BatchPanel'
 
 export default function UploadTab({ quizzes, onRefresh }) {
+  const [mode, setMode] = useState('single')  // 'single' | 'batch'
+
   const [selectedQuiz, setSelectedQuiz] = useState('')
   const [newQuizName, setNewQuizName]   = useState('')
   const [gameDate, setGameDate]         = useState('')
@@ -117,7 +120,27 @@ export default function UploadTab({ quizzes, onRefresh }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate>
+    <div>
+      <div className="source-toggle" role="group" aria-label="Режим загрузки" style={{ marginBottom: '1.5rem' }}>
+        <button
+          type="button"
+          className={`source-toggle__btn${mode === 'single' ? ' source-toggle__btn--active' : ''}`}
+          onClick={() => setMode('single')}
+        >
+          Один альбом
+        </button>
+        <button
+          type="button"
+          className={`source-toggle__btn${mode === 'batch' ? ' source-toggle__btn--active' : ''}`}
+          onClick={() => setMode('batch')}
+        >
+          Несколько альбомов
+        </button>
+      </div>
+
+      {mode === 'batch' && <BatchPanel onRefresh={onRefresh} />}
+
+      {mode === 'single' && <form onSubmit={handleSubmit} noValidate>
       {error && (
         <div className="error-banner" role="alert">
           <span className="error-banner__msg">{error}</span>
@@ -215,6 +238,7 @@ export default function UploadTab({ quizzes, onRefresh }) {
             : 'Сохранить в базу'
         }
       </button>
-    </form>
+      </form>}
+    </div>
   )
 }
