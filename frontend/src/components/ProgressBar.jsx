@@ -1,4 +1,4 @@
-export default function ProgressBar({ processed, total, facesFound, elapsed, fmtTime }) {
+export default function ProgressBar({ processed, total, facesFound, elapsed, fmtTime, label = 'Обработано фото' }) {
   const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0
 
   return (
@@ -7,9 +7,9 @@ export default function ProgressBar({ processed, total, facesFound, elapsed, fmt
         <div className="progress-bar__fill" style={{ width: `${pct}%` }} />
       </div>
       <p className="progress-text">
-        Обработано фото: {processed} из {total > 0 ? total : '…'} &bull; Найдено лиц: {facesFound}
+        {label}: {processed} из {total > 0 ? total : '…'} &bull; Найдено лиц: {facesFound}
       </p>
-      <p className="progress-text">Время обработки: {fmtTime(elapsed)}</p>
+      {fmtTime && <p className="progress-text">Время обработки: {fmtTime(elapsed)}</p>}
     </div>
   )
 }

@@ -34,6 +34,11 @@ class VkUploadRequest(BaseModel):
     game_date: str  # YYYY-MM-DD
 
 
+class CheckFromVkRequest(BaseModel):
+    album_url: str
+    quiz_name: str
+
+
 class BatchItem(BaseModel):
     quiz_name: str
     game_date: str  # YYYY-MM-DD

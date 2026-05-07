@@ -12,9 +12,10 @@ from sqlalchemy.orm import Session
 from .config import FACE_DETECTION_MODEL, FACE_TOLERANCE, UPLOADS_DIR, VK_SERVICE_KEY
 from .database import SessionLocal, get_db
 from .models import FaceEncoding, Game, Photo, Quiz
-from .schemas import BatchUploadRequest, CheckResult, FaceMatch, QuizOut, TaskResponse, VkUploadRequest
+from .schemas import BatchUploadRequest, CheckFromVkRequest, CheckResult, FaceMatch, QuizOut, TaskResponse, VkUploadRequest
 from .services import (
     check_faces_from_images,
+    check_faces_with_progress,
     extract_faces_parallel,
     get_or_create_game,
     get_or_create_quiz,
@@ -392,6 +393,38 @@ async def check_photos(
 
 
 # ---------------------------------------------------------------------------
+# POST /check-from-vk  — проверить альбом ВК, вернуть task_id
+# ---------------------------------------------------------------------------
+
+@router.post("/check-from-vk", response_model=TaskResponse)
+async def check_from_vk(body: CheckFromVkRequest):
+    if not VK_SERVICE_KEY:
+        raise HTTPException(status_code=503, detail="VK_SERVICE_KEY не задан на сервере")
+
+    db_local = SessionLocal()
+    try:
+        quiz = db_local.query(Quiz).filter(Quiz.name == body.quiz_name.strip()).first()
+        if not quiz:
+            raise HTTPException(status_code=404, detail=f"Квиз «{body.quiz_name}» не найден")
+        quiz_id = quiz.id
+    finally:
+        db_local.close()
+
+    try:
+        urls = get_album_photo_urls(body.album_url, VK_SERVICE_KEY)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    task_id = str(uuid_module.uuid4())
+    with tasks_lock:
+        tasks[task_id] = {"processed": 0, "total": len(urls), "faces_found": 0, "done": False, "error": None, "result": None}
+
+    t = threading.Thread(target=_run_check_vk_bg, args=(task_id, quiz_id, urls), daemon=True)
+    t.start()
+    return TaskResponse(task_id=task_id)
+
+
+# ---------------------------------------------------------------------------
 # GET /progress/{task_id}  — polling endpoint
 # ---------------------------------------------------------------------------
 
@@ -403,6 +436,46 @@ def get_progress(task_id: str):
         state = dict(tasks[task_id])
 
     return JSONResponse(state)
+
+
+# ---------------------------------------------------------------------------
+# Check-from-VK background helper
+# ---------------------------------------------------------------------------
+
+def _run_check_vk_bg(task_id: str, quiz_id: int, urls: list[str]) -> None:
+    """Background thread for POST /check-from-vk."""
+    try:
+        raw = download_photos(urls)
+        images = [(data, f"vk_{i+1}.jpg") for i, data in enumerate(raw) if data is not None]
+
+        with tasks_lock:
+            tasks[task_id]["total"] = len(images)
+
+        db = SessionLocal()
+        try:
+            all_data = load_all_quiz_faces(db, quiz_id)
+        finally:
+            db.close()
+
+        def _progress(processed, total, faces_found):
+            with tasks_lock:
+                tasks[task_id].update({"processed": processed, "faces_found": faces_found})
+
+        total, cheaters = check_faces_with_progress(
+            images, all_data, UPLOADS_DIR, FACE_TOLERANCE, FACE_DETECTION_MODEL, _progress
+        )
+
+        with tasks_lock:
+            tasks[task_id].update({
+                "done":   True,
+                "result": {"total_faces_found": total, "cheaters": cheaters},
+            })
+        logger.info("Check-VK task %s done: %d faces, %d matches", task_id, total, len(cheaters))
+
+    except Exception as exc:
+        logger.exception("Check-VK task %s failed", task_id)
+        with tasks_lock:
+            tasks[task_id].update({"error": str(exc), "done": True})
 
 
 # ---------------------------------------------------------------------------

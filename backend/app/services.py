@@ -384,3 +384,90 @@ def check_faces_from_images(
 
     logger.info("Check found %d match(es)", len(matches))
     return len(new_faces), matches
+
+
+# ---------------------------------------------------------------------------
+# Check without saving — with per-image progress callback
+# ---------------------------------------------------------------------------
+
+def check_faces_with_progress(
+    images: list[tuple[bytes, str]],
+    all_quiz_data: list[tuple],
+    uploads_dir: str,
+    tolerance: float = 0.5,
+    detection_model: str = "hog",
+    progress_cb=None,
+) -> tuple[int, list[dict]]:
+    """
+    Same as check_faces_from_images but calls progress_cb(processed, total, faces_found)
+    after every image so callers can track progress asynchronously.
+    """
+    tmp_dir = os.path.join(uploads_dir, "faces", "tmp")
+    os.makedirs(tmp_dir, exist_ok=True)
+    total = len(images)
+    new_faces: list[tuple[np.ndarray, str]] = []
+
+    for idx, (image_data, filename) in enumerate(images):
+        try:
+            pil_image = ImageOps.exif_transpose(Image.open(BytesIO(image_data)).convert("RGB"))
+            if max(pil_image.size) > 1200:
+                pil_image.thumbnail((1200, 1200), Image.LANCZOS)
+        except Exception as exc:
+            logger.warning("Cannot open %r: %s", filename, exc)
+            if progress_cb: progress_cb(idx + 1, total, len(new_faces))
+            continue
+
+        np_image = np.array(pil_image)
+        try:
+            locations = face_recognition.face_locations(np_image, model=detection_model)
+        except Exception as exc:
+            logger.warning("face_locations failed for %r: %s", filename, exc)
+            if progress_cb: progress_cb(idx + 1, total, len(new_faces))
+            continue
+
+        if not locations:
+            if progress_cb: progress_cb(idx + 1, total, len(new_faces))
+            continue
+
+        try:
+            encodings = face_recognition.face_encodings(np_image, locations)
+        except Exception as exc:
+            logger.warning("face_encodings failed for %r: %s", filename, exc)
+            if progress_cb: progress_cb(idx + 1, total, len(new_faces))
+            continue
+
+        for (top, right, bottom, left), encoding in zip(locations, encodings):
+            pad = 20
+            h, w = np_image.shape[:2]
+            crop = pil_image.crop((max(0, left-pad), max(0, top-pad), min(w, right+pad), min(h, bottom+pad)))
+            face_filename = f"{uuid.uuid4()}.jpg"
+            crop.save(os.path.join(tmp_dir, face_filename), "JPEG", quality=90)
+            new_faces.append((encoding, f"/faces/tmp/{face_filename}"))
+
+        if progress_cb: progress_cb(idx + 1, total, len(new_faces))
+
+    logger.info("Extracted %d face(s) for progressive check", len(new_faces))
+
+    if not new_faces or not all_quiz_data:
+        return len(new_faces), []
+
+    old_encodings = [np.frombuffer(enc.encoding, dtype=np.float64) for enc, _, _ in all_quiz_data]
+    matches: list[dict] = []
+    seen: set[tuple] = set()
+
+    for new_enc, new_url in new_faces:
+        results = face_recognition.compare_faces(old_encodings, new_enc, tolerance=tolerance)
+        for matched, (old_face, old_game, old_quiz) in zip(results, all_quiz_data):
+            if not matched: continue
+            pair = (new_url, old_face.id)
+            if pair in seen: continue
+            seen.add(pair)
+            matches.append({
+                "new_face_image": new_url,
+                "old_face_image": f"/faces/{old_face.face_image_filename}",
+                "old_game_date":  str(old_game.date),
+                "old_quiz_name":  old_quiz.name,
+            })
+
+    logger.info("Progressive check found %d match(es)", len(matches))
+    return len(new_faces), matches

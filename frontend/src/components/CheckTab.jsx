@@ -1,19 +1,88 @@
 import { useState, useRef, useEffect } from 'react'
-import { checkPhotos } from '../api'
+import { checkPhotos, checkFromVk, getProgressUrl } from '../api'
 import DropZone from './DropZone'
+import ProgressBar from './ProgressBar'
 import Results from './Results'
+
+const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
 export default function CheckTab({ quizzes }) {
   const [selectedQuiz, setSelectedQuiz] = useState('')
+  const [source, setSource]             = useState('files')  // 'files' | 'vk'
   const [files, setFiles]               = useState([])
-  const [loading, setLoading]           = useState(false)
-  const [error, setError]               = useState(null)
-  const [checkResult, setCheckResult]   = useState(null)
-  const resultsRef = useRef(null)
+  const [vkUrl, setVkUrl]               = useState('')
+
+  const [loading, setLoading]       = useState(false)
+  const [progress, setProgress]     = useState(null)   // {processed, total, facesFound}
+  const [elapsed, setElapsed]       = useState(0)
+  const [error, setError]           = useState(null)
+  const [checkResult, setCheckResult] = useState(null)
+
+  const intervalRef = useRef(null)
+  const timerRef    = useRef(null)
+  const resultsRef  = useRef(null)
+
+  const isProcessing = progress !== null
 
   useEffect(() => {
     if (checkResult) resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [checkResult])
+
+  useEffect(() => () => {
+    if (intervalRef.current) clearInterval(intervalRef.current)
+    if (timerRef.current)    clearInterval(timerRef.current)
+  }, [])
+
+  const handleSourceChange = (val) => {
+    setSource(val)
+    setError(null)
+    setCheckResult(null)
+  }
+
+  const stopAll = () => {
+    clearInterval(intervalRef.current); intervalRef.current = null
+    clearInterval(timerRef.current);    timerRef.current    = null
+  }
+
+  const startPolling = (taskId) => {
+    setProgress({ processed: 0, total: 0, facesFound: 0 })
+    setElapsed(0)
+    let seconds = 0
+    let failures = 0
+
+    timerRef.current = setInterval(() => { seconds++; setElapsed(seconds) }, 1000)
+
+    intervalRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(getProgressUrl(taskId))
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        failures = 0
+
+        setProgress({ processed: data.processed, total: data.total, facesFound: data.faces_found })
+
+        if (data.error) {
+          stopAll()
+          setError(data.error)
+          setProgress(null)
+          return
+        }
+
+        if (data.done) {
+          stopAll()
+          setProgress(null)
+          setCheckResult(data.result)
+        }
+      } catch {
+        failures++
+        if (failures >= 3) {
+          stopAll()
+          setError('Потеряно соединение с сервером во время проверки')
+          setProgress(null)
+        }
+      }
+    }, 2000)
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -21,18 +90,26 @@ export default function CheckTab({ quizzes }) {
     setCheckResult(null)
 
     if (!selectedQuiz) { setError('Выберите квиз из списка'); return }
-    if (!files.length)  { setError('Добавьте хотя бы одну фотографию'); return }
+    if (source === 'files' && !files.length)  { setError('Добавьте хотя бы одну фотографию'); return }
+    if (source === 'vk'    && !vkUrl.trim())  { setError('Введите ссылку на альбом ВКонтакте'); return }
 
     setLoading(true)
     try {
-      const data = await checkPhotos({ files, quizName: selectedQuiz })
-      setCheckResult(data)
+      if (source === 'files') {
+        const data = await checkPhotos({ files, quizName: selectedQuiz })
+        setCheckResult(data)
+      } else {
+        const data = await checkFromVk({ quizName: selectedQuiz, albumUrl: vkUrl.trim() })
+        startPolling(data.task_id)
+      }
     } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
     }
   }
+
+  const disabled = loading || isProcessing
 
   return (
     <>
@@ -58,14 +135,55 @@ export default function CheckTab({ quizzes }) {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Фотографии для проверки</label>
-          <DropZone files={files} onFilesChange={setFiles} />
+          <label className="form-label">Источник фотографий</label>
+          <div className="source-toggle" role="group" aria-label="Источник фотографий">
+            <button
+              type="button"
+              className={`source-toggle__btn${source === 'files' ? ' source-toggle__btn--active' : ''}`}
+              onClick={() => handleSourceChange('files')}
+            >
+              Загрузить файлы
+            </button>
+            <button
+              type="button"
+              className={`source-toggle__btn${source === 'vk' ? ' source-toggle__btn--active' : ''}`}
+              onClick={() => handleSourceChange('vk')}
+            >
+              Загрузить из ВК
+            </button>
+          </div>
+
+          {source === 'files' ? (
+            <DropZone files={files} onFilesChange={setFiles} />
+          ) : (
+            <input
+              type="url"
+              className="form-input"
+              placeholder="https://vk.com/album-12345_67890"
+              value={vkUrl}
+              onChange={e => setVkUrl(e.target.value)}
+              style={{ marginTop: '.75rem' }}
+            />
+          )}
         </div>
 
-        <button type="submit" className="btn-submit" disabled={loading}>
+        {isProcessing && (
+          <ProgressBar
+            processed={progress.processed}
+            total={progress.total}
+            facesFound={progress.facesFound}
+            elapsed={elapsed}
+            fmtTime={fmtTime}
+            label="Проверено фото"
+          />
+        )}
+
+        <button type="submit" className="btn-submit" disabled={disabled}>
           {loading
-            ? <><span className="spinner" aria-hidden="true" /> Анализируем…</>
-            : 'Проверить на читеров'
+            ? <><span className="spinner" aria-hidden="true" /> Отправляем…</>
+            : isProcessing
+              ? <><span className="spinner" aria-hidden="true" /> Анализируем…</>
+              : 'Проверить на читеров'
           }
         </button>
       </form>
