@@ -11,6 +11,7 @@ export default function CheckTab({ quizzes }) {
   const [source, setSource]             = useState('files')  // 'files' | 'vk'
   const [files, setFiles]               = useState([])
   const [vkUrl, setVkUrl]               = useState('')
+  const [tolerance, setTolerance]       = useState(0.45)
 
   const [loading, setLoading]       = useState(false)
   const [progress, setProgress]     = useState(null)   // {processed, total, facesFound}
@@ -96,10 +97,10 @@ export default function CheckTab({ quizzes }) {
     setLoading(true)
     try {
       if (source === 'files') {
-        const data = await checkPhotos({ files, quizName: selectedQuiz })
+        const data = await checkPhotos({ files, quizName: selectedQuiz, tolerance })
         setCheckResult(data)
       } else {
-        const data = await checkFromVk({ quizName: selectedQuiz, albumUrl: vkUrl.trim() })
+        const data = await checkFromVk({ quizName: selectedQuiz, albumUrl: vkUrl.trim(), tolerance })
         startPolling(data.task_id)
       }
     } catch (err) {
@@ -132,6 +133,30 @@ export default function CheckTab({ quizzes }) {
             <option value="">— Выберите квиз —</option>
             {quizzes.map(q => <option key={q.id} value={q.name}>{q.name}</option>)}
           </select>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">
+            Строгость проверки: <span className="tolerance-value">{tolerance.toFixed(2)}</span>
+          </label>
+          <div className="tolerance-wrap">
+            <input
+              type="range"
+              className="tolerance-slider"
+              min="0.3"
+              max="0.6"
+              step="0.05"
+              value={tolerance}
+              onChange={e => setTolerance(parseFloat(e.target.value))}
+            />
+            <div className="tolerance-labels">
+              <span>Строже</span>
+              <span>Мягче</span>
+            </div>
+          </div>
+          <p className="tolerance-hint">
+            Меньшее значение — меньше ложных срабатываний, но может пропустить некоторых читеров
+          </p>
         </div>
 
         <div className="form-group">

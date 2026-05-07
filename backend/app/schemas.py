@@ -37,6 +37,7 @@ class VkUploadRequest(BaseModel):
 class CheckFromVkRequest(BaseModel):
     album_url: str
     quiz_name: str
+    tolerance: float = 0.45
 
 
 class BatchItem(BaseModel):

@@ -381,6 +381,35 @@ body {
   font-size: .9375rem;
 }
 
+/* ─── Tolerance slider ───────────────────────────────────────────────────── */
+.tolerance-value {
+  font-weight: 400;
+  color: var(--primary);
+  font-size: .875rem;
+  margin-left: .25rem;
+}
+.tolerance-wrap { max-width: 320px; }
+.tolerance-slider {
+  width: 100%;
+  accent-color: var(--primary);
+  cursor: pointer;
+  margin-bottom: .25rem;
+}
+.tolerance-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: .75rem;
+  color: var(--muted);
+  margin-top: .1rem;
+}
+.tolerance-hint {
+  font-size: .8125rem;
+  color: var(--muted);
+  margin-top: .5rem;
+  max-width: 380px;
+  line-height: 1.4;
+}
+
 /* ─── Database tab ───────────────────────────────────────────────────────── */
 .db-stats {
   display: grid;

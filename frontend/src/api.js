@@ -38,11 +38,11 @@ export async function uploadFromVk({ quizName, gameDate, albumUrl }) {
 }
 
 // Returns { task_id }
-export async function checkFromVk({ quizName, albumUrl }) {
+export async function checkFromVk({ quizName, albumUrl, tolerance = 0.45 }) {
   const res = await fetch(`${BASE_URL}/check-from-vk`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ quiz_name: quizName, album_url: albumUrl }),
+    body: JSON.stringify({ quiz_name: quizName, album_url: albumUrl, tolerance }),
   })
   if (!res.ok) {
     let detail = `Ошибка сервера (${res.status})`
@@ -52,9 +52,10 @@ export async function checkFromVk({ quizName, albumUrl }) {
   return res.json()
 }
 
-export async function checkPhotos({ files, quizName }) {
+export async function checkPhotos({ files, quizName, tolerance = 0.45 }) {
   const form = new FormData()
   form.append('quiz_name', quizName)
+  form.append('tolerance', tolerance)
   for (const file of files) form.append('files', file)
 
   const res = await fetch(`${BASE_URL}/check`, { method: 'POST', body: form })

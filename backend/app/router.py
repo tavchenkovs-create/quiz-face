@@ -358,6 +358,7 @@ async def upload_batch(body: BatchUploadRequest):
 async def check_photos(
     files: list[UploadFile] = File(...),
     quiz_name: str = Form(..., min_length=1, max_length=255),
+    tolerance: float = Form(0.45),
     db: Session = Depends(get_db),
 ):
     if not files:
@@ -378,7 +379,7 @@ async def check_photos(
                 images.append((data, upload.filename or "photo.jpg"))
 
         total, cheaters_raw = check_faces_from_images(
-            images, all_data, UPLOADS_DIR, tolerance=FACE_TOLERANCE, detection_model=FACE_DETECTION_MODEL,
+            images, all_data, UPLOADS_DIR, tolerance=tolerance, detection_model=FACE_DETECTION_MODEL,
         )
         logger.info("Check complete: quiz=%r faces=%d matches=%d", quiz_name, total, len(cheaters_raw))
         return CheckResult(
@@ -419,7 +420,7 @@ async def check_from_vk(body: CheckFromVkRequest):
     with tasks_lock:
         tasks[task_id] = {"processed": 0, "total": len(urls), "faces_found": 0, "done": False, "error": None, "result": None}
 
-    t = threading.Thread(target=_run_check_vk_bg, args=(task_id, quiz_id, urls), daemon=True)
+    t = threading.Thread(target=_run_check_vk_bg, args=(task_id, quiz_id, urls, body.tolerance), daemon=True)
     t.start()
     return TaskResponse(task_id=task_id)
 
@@ -442,7 +443,7 @@ def get_progress(task_id: str):
 # Check-from-VK background helper
 # ---------------------------------------------------------------------------
 
-def _run_check_vk_bg(task_id: str, quiz_id: int, urls: list[str]) -> None:
+def _run_check_vk_bg(task_id: str, quiz_id: int, urls: list[str], tolerance: float) -> None:
     """Background thread for POST /check-from-vk."""
     try:
         raw = download_photos(urls)
@@ -462,7 +463,7 @@ def _run_check_vk_bg(task_id: str, quiz_id: int, urls: list[str]) -> None:
                 tasks[task_id].update({"processed": processed, "faces_found": faces_found})
 
         total, cheaters = check_faces_with_progress(
-            images, all_data, UPLOADS_DIR, FACE_TOLERANCE, FACE_DETECTION_MODEL, _progress
+            images, all_data, UPLOADS_DIR, tolerance, FACE_DETECTION_MODEL, _progress
         )
 
         with tasks_lock:
