@@ -51,6 +51,28 @@ export async function checkPhotos({ files, quizName }) {
   return res.json()
 }
 
+export async function fetchStats() {
+  const res = await fetch(`${BASE_URL}/stats`)
+  if (!res.ok) throw new Error(`Не удалось загрузить статистику (${res.status})`)
+  return res.json()
+}
+
+export async function fetchDatabase() {
+  const res = await fetch(`${BASE_URL}/database`)
+  if (!res.ok) throw new Error(`Не удалось загрузить базу данных (${res.status})`)
+  return res.json()
+}
+
+export async function deleteGame(gameId) {
+  const res = await fetch(`${BASE_URL}/games/${gameId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    let detail = `Ошибка сервера (${res.status})`
+    try { const b = await res.json(); if (b.detail) detail = b.detail } catch (_) {}
+    throw new Error(detail)
+  }
+  return res.json()
+}
+
 // Returns { task_id }
 export async function uploadBatch(items) {
   const res = await fetch(`${BASE_URL}/upload-batch`, {

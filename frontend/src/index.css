@@ -381,6 +381,107 @@ body {
   font-size: .9375rem;
 }
 
+/* ─── Database tab ───────────────────────────────────────────────────────── */
+.db-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+.db-stat {
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  text-align: center;
+}
+.db-stat__value {
+  display: block;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--primary);
+  line-height: 1.2;
+}
+.db-stat__label {
+  display: block;
+  font-size: .8125rem;
+  color: var(--muted);
+  margin-top: .25rem;
+}
+
+.db-loading, .db-empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 2rem 0;
+  font-size: .9375rem;
+}
+
+.accordion { border: 1.5px solid var(--border); border-radius: 10px; overflow: hidden; }
+.accordion__item + .accordion__item { border-top: 1px solid var(--border); }
+
+.accordion__head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .875rem 1.25rem;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s;
+}
+.accordion__head:hover          { background: var(--bg); }
+.accordion__head--open          { background: var(--bg); }
+
+.accordion__title {
+  flex: 1;
+  font-size: .9375rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.accordion__meta {
+  font-size: .8125rem;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.accordion__chevron {
+  color: var(--muted);
+  font-size: .875rem;
+  flex-shrink: 0;
+  transition: transform .2s;
+}
+.accordion__head--open .accordion__chevron { transform: rotate(180deg); }
+
+.accordion__body {
+  border-top: 1px solid var(--border);
+  padding: .25rem 0;
+}
+
+.db-game-row {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .5rem 1.25rem .5rem 2rem;
+}
+.db-game-row__date  { flex: 1; font-size: .9375rem; color: var(--text); }
+.db-game-row__faces { font-size: .875rem; color: var(--muted); flex-shrink: 0; }
+.db-game-row__delete {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  padding: .25rem;
+  opacity: .45;
+  flex-shrink: 0;
+  transition: opacity .15s;
+  line-height: 1;
+}
+.db-game-row__delete:hover { opacity: 1; }
+
+@media (max-width: 540px) {
+  .db-stats { grid-template-columns: 1fr; }
+}
+
 /* ─── Batch upload ───────────────────────────────────────────────────────── */
 .form-textarea {
   width: 100%;

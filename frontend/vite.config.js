@@ -5,7 +5,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/quizzes': { target: 'http://localhost:8000', changeOrigin: true },
+      '/quizzes':  { target: 'http://localhost:8000', changeOrigin: true },
+      '/stats':    { target: 'http://localhost:8000', changeOrigin: true },
+      '/database': { target: 'http://localhost:8000', changeOrigin: true },
+      '/games':    { target: 'http://localhost:8000', changeOrigin: true },
       '/upload':         { target: 'http://localhost:8000', changeOrigin: true },
       '/upload-from-vk': { target: 'http://localhost:8000', changeOrigin: true },
       '/upload-batch':   { target: 'http://localhost:8000', changeOrigin: true },

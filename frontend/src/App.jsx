@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { fetchQuizzes } from './api'
 import UploadTab from './components/UploadTab'
+import DatabaseTab from './components/DatabaseTab'
 import CheckTab from './components/CheckTab'
 
 export default function App() {
@@ -14,6 +15,12 @@ export default function App() {
       .catch(e => setError(e.message))
 
   useEffect(() => { refreshQuizzes() }, [])
+
+  const tabs = [
+    { id: 'upload',   label: 'База' },
+    { id: 'database', label: 'База данных' },
+    { id: 'check',    label: 'Проверка' },
+  ]
 
   return (
     <div>
@@ -33,28 +40,22 @@ export default function App() {
 
         <div className="card">
           <div className="tabs" role="tablist">
-            <button
-              role="tab"
-              aria-selected={activeTab === 'upload'}
-              className={`tab${activeTab === 'upload' ? ' tab--active' : ''}`}
-              onClick={() => setActiveTab('upload')}
-            >
-              База
-            </button>
-            <button
-              role="tab"
-              aria-selected={activeTab === 'check'}
-              className={`tab${activeTab === 'check' ? ' tab--active' : ''}`}
-              onClick={() => setActiveTab('check')}
-            >
-              Проверка
-            </button>
+            {tabs.map(t => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={activeTab === t.id}
+                className={`tab${activeTab === t.id ? ' tab--active' : ''}`}
+                onClick={() => setActiveTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
 
-          {activeTab === 'upload'
-            ? <UploadTab quizzes={quizzes} onRefresh={refreshQuizzes} />
-            : <CheckTab quizzes={quizzes} />
-          }
+          {activeTab === 'upload'   && <UploadTab quizzes={quizzes} onRefresh={refreshQuizzes} />}
+          {activeTab === 'database' && <DatabaseTab onRefresh={refreshQuizzes} />}
+          {activeTab === 'check'    && <CheckTab quizzes={quizzes} />}
         </div>
       </main>
     </div>

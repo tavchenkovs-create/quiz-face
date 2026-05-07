@@ -6,11 +6,12 @@ from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .config import FACE_DETECTION_MODEL, FACE_TOLERANCE, UPLOADS_DIR, VK_SERVICE_KEY
 from .database import SessionLocal, get_db
-from .models import FaceEncoding, Photo, Quiz
+from .models import FaceEncoding, Game, Photo, Quiz
 from .schemas import BatchUploadRequest, CheckResult, FaceMatch, QuizOut, TaskResponse, VkUploadRequest
 from .services import (
     check_faces_from_images,
@@ -402,6 +403,70 @@ def get_progress(task_id: str):
         state = dict(tasks[task_id])
 
     return JSONResponse(state)
+
+
+# ---------------------------------------------------------------------------
+# GET /stats
+# ---------------------------------------------------------------------------
+
+@router.get("/stats")
+def get_stats(db: Session = Depends(get_db)):
+    total_quizzes = db.query(func.count(Quiz.id)).scalar() or 0
+    total_games   = db.query(func.count(Game.id)).scalar() or 0
+    total_faces   = db.query(func.count(FaceEncoding.id)).scalar() or 0
+    return {"total_quizzes": total_quizzes, "total_games": total_games, "total_faces": total_faces}
+
+
+# ---------------------------------------------------------------------------
+# GET /database
+# ---------------------------------------------------------------------------
+
+@router.get("/database")
+def get_database(db: Session = Depends(get_db)):
+    rows = (
+        db.query(Quiz, Game, func.count(FaceEncoding.id).label("face_count"))
+        .join(Game, Game.quiz_id == Quiz.id)
+        .outerjoin(Photo, Photo.game_id == Game.id)
+        .outerjoin(FaceEncoding, FaceEncoding.photo_id == Photo.id)
+        .group_by(Quiz.id, Game.id)
+        .order_by(Quiz.name, Game.date)
+        .all()
+    )
+    result: dict[int, dict] = {}
+    for quiz, game, face_count in rows:
+        if quiz.id not in result:
+            result[quiz.id] = {"quiz_id": quiz.id, "quiz_name": quiz.name, "games": []}
+        result[quiz.id]["games"].append({"game_id": game.id, "date": str(game.date), "face_count": face_count})
+    return list(result.values())
+
+
+# ---------------------------------------------------------------------------
+# DELETE /games/{game_id}
+# ---------------------------------------------------------------------------
+
+@router.delete("/games/{game_id}")
+def delete_game(game_id: int, db: Session = Depends(get_db)):
+    game = db.query(Game).filter(Game.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    quiz_id = game.quiz_id
+
+    photo_ids = [row.id for row in db.query(Photo.id).filter(Photo.game_id == game_id).all()]
+    if photo_ids:
+        db.query(FaceEncoding).filter(FaceEncoding.photo_id.in_(photo_ids)).delete(synchronize_session=False)
+    db.query(Photo).filter(Photo.game_id == game_id).delete(synchronize_session=False)
+    db.delete(game)
+    db.flush()
+
+    if db.query(func.count(Game.id)).filter(Game.quiz_id == quiz_id).scalar() == 0:
+        quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+        if quiz:
+            db.delete(quiz)
+
+    db.commit()
+    logger.info("Deleted game_id=%d (quiz_id=%d)", game_id, quiz_id)
+    return {"deleted": True}
 
 
 # ---------------------------------------------------------------------------
