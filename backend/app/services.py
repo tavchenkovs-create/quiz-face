@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 import uuid
@@ -12,6 +13,8 @@ from sqlalchemy.orm import Session
 from .models import FaceEncoding, Game, Photo, Quiz
 
 logger = logging.getLogger(__name__)
+
+MAX_IMAGE_PX = 800  # max long-side before face detection
 
 
 # ---------------------------------------------------------------------------
@@ -98,31 +101,36 @@ def process_photo(
 
     photo = Photo(game_id=game.id, filename=f"originals/{game.id}/{safe_name}")
     db.add(photo)
-    db.flush()  # need photo.id before creating FaceEncoding rows
+    db.flush()
 
-    # --- decode image ---------------------------------------------------
+    # --- decode + resize image ------------------------------------------
     try:
         pil_image = ImageOps.exif_transpose(
             Image.open(BytesIO(image_data)).convert("RGB")
         )
+        if max(pil_image.size) > MAX_IMAGE_PX:
+            pil_image.thumbnail((MAX_IMAGE_PX, MAX_IMAGE_PX), Image.LANCZOS)
     except Exception as exc:
         logger.warning("Cannot open %r: %s", original_filename, exc)
         return []
 
     np_image = np.array(pil_image)
-    logger.info(
-        "Processing %r (%dx%d)", original_filename, np_image.shape[1], np_image.shape[0]
-    )
+    h, w = np_image.shape[:2]
+    logger.info("Processing %r (%dx%d)", original_filename, w, h)
 
     # --- detect + encode faces -----------------------------------------
     try:
         locations = face_recognition.face_locations(np_image, model=detection_model)
     except Exception as exc:
         logger.warning("face_locations failed for %r: %s", original_filename, exc)
+        del np_image, pil_image
+        gc.collect()
         return []
 
     if not locations:
         logger.info("No faces found in %r", original_filename)
+        del np_image, pil_image
+        gc.collect()
         return []
 
     logger.info("Found %d face(s) in %r", len(locations), original_filename)
@@ -131,7 +139,12 @@ def process_photo(
         encodings = face_recognition.face_encodings(np_image, locations)
     except Exception as exc:
         logger.warning("face_encodings failed for %r: %s", original_filename, exc)
+        del np_image, pil_image
+        gc.collect()
         return []
+
+    del np_image  # no longer needed after encodings extracted
+    gc.collect()
 
     # --- crop & save each face -----------------------------------------
     faces_dir = os.path.join(uploads_dir, "faces", str(game.id))
@@ -141,13 +154,11 @@ def process_photo(
     for top, right, bottom, left in locations:
         encoding = encodings[len(new_records)]
 
-        # add padding so the crop doesn't cut into the face
         pad = 20
-        h, w = np_image.shape[:2]
-        crop_top = max(0, top - pad)
-        crop_left = max(0, left - pad)
+        crop_top    = max(0, top    - pad)
+        crop_left   = max(0, left   - pad)
         crop_bottom = min(h, bottom + pad)
-        crop_right = min(w, right + pad)
+        crop_right  = min(w, right  + pad)
 
         face_crop = pil_image.crop((crop_left, crop_top, crop_right, crop_bottom))
         face_filename = f"{uuid.uuid4()}.jpg"
@@ -155,13 +166,16 @@ def process_photo(
 
         record = FaceEncoding(
             photo_id=photo.id,
-            encoding=encoding.tobytes(),          # 128 × float64 = 1024 bytes
+            encoding=encoding.tobytes(),
             face_image_filename=f"{game.id}/{face_filename}",
         )
         db.add(record)
         new_records.append(record)
 
-    db.flush()  # assign IDs to all new records at once
+    del pil_image
+    gc.collect()
+
+    db.flush()
     logger.info("Saved %d face encoding(s) from %r", len(new_records), original_filename)
     return new_records
 
@@ -191,31 +205,40 @@ def extract_faces_parallel(
 
     try:
         pil_image = ImageOps.exif_transpose(Image.open(BytesIO(image_data)).convert("RGB"))
+        if max(pil_image.size) > MAX_IMAGE_PX:
+            pil_image.thumbnail((MAX_IMAGE_PX, MAX_IMAGE_PX), Image.LANCZOS)
     except Exception as exc:
         logger.warning("Cannot open %r: %s", filename, exc)
         return original_relative, []
 
-    if max(pil_image.size) > 1200:
-        pil_image.thumbnail((1200, 1200), Image.LANCZOS)
-
     np_image = np.array(pil_image)
-    logger.info("Processing %r (%dx%d)", filename, np_image.shape[1], np_image.shape[0])
+    h, w = np_image.shape[:2]
+    logger.info("Processing %r (%dx%d)", filename, w, h)
 
     try:
         locations = face_recognition.face_locations(np_image, model=detection_model)
     except Exception as exc:
         logger.warning("face_locations failed for %r: %s", filename, exc)
+        del np_image, pil_image
+        gc.collect()
         return original_relative, []
 
     if not locations:
         logger.info("No faces in %r", filename)
+        del np_image, pil_image
+        gc.collect()
         return original_relative, []
 
     try:
         encodings = face_recognition.face_encodings(np_image, locations)
     except Exception as exc:
         logger.warning("face_encodings failed for %r: %s", filename, exc)
+        del np_image, pil_image
+        gc.collect()
         return original_relative, []
+
+    del np_image  # no longer needed after encodings extracted
+    gc.collect()
 
     faces_dir = os.path.join(uploads_dir, "faces", str(game_id))
     os.makedirs(faces_dir, exist_ok=True)
@@ -223,7 +246,6 @@ def extract_faces_parallel(
     results: list[dict] = []
     for (top, right, bottom, left), encoding in zip(locations, encodings):
         pad = 20
-        h, w = np_image.shape[:2]
         crop = pil_image.crop((max(0,left-pad), max(0,top-pad), min(w,right+pad), min(h,bottom+pad)))
         face_filename = f"{uuid.uuid4()}.jpg"
         crop.save(os.path.join(faces_dir, face_filename), "JPEG", quality=90)
@@ -232,6 +254,8 @@ def extract_faces_parallel(
             "encoding_bytes": encoding.tobytes(),
         })
 
+    del pil_image
+    gc.collect()
     logger.info("Extracted %d face(s) from %r", len(results), filename)
     return original_relative, results
 
@@ -314,34 +338,43 @@ def check_faces_from_images(
             pil_image = ImageOps.exif_transpose(
                 Image.open(BytesIO(image_data)).convert("RGB")
             )
+            if max(pil_image.size) > MAX_IMAGE_PX:
+                pil_image.thumbnail((MAX_IMAGE_PX, MAX_IMAGE_PX), Image.LANCZOS)
         except Exception as exc:
             logger.warning("Cannot open %r: %s", filename, exc)
             continue
 
         np_image = np.array(pil_image)
-        logger.info("Checking %r (%dx%d)", filename, np_image.shape[1], np_image.shape[0])
+        h, w = np_image.shape[:2]
+        logger.info("Checking %r (%dx%d)", filename, w, h)
 
         try:
             locations = face_recognition.face_locations(np_image, model=detection_model)
         except Exception as exc:
             logger.warning("face_locations failed for %r: %s", filename, exc)
+            del np_image, pil_image
+            gc.collect()
             continue
 
         if not locations:
             logger.info("No faces in %r", filename)
+            del np_image, pil_image
+            gc.collect()
             continue
 
         try:
             encodings = face_recognition.face_encodings(np_image, locations)
         except Exception as exc:
             logger.warning("face_encodings failed for %r: %s", filename, exc)
+            del np_image, pil_image
+            gc.collect()
             continue
 
+        del np_image
         logger.info("Found %d face(s) in %r", len(locations), filename)
 
         for (top, right, bottom, left), encoding in zip(locations, encodings):
             pad = 20
-            h, w = np_image.shape[:2]
             crop = pil_image.crop((
                 max(0, left - pad), max(0, top - pad),
                 min(w, right + pad), min(h, bottom + pad),
@@ -349,6 +382,9 @@ def check_faces_from_images(
             face_filename = f"{uuid.uuid4()}.jpg"
             crop.save(os.path.join(tmp_dir, face_filename), "JPEG", quality=90)
             new_faces.append((encoding, f"/faces/tmp/{face_filename}"))
+
+        del pil_image
+        gc.collect()
 
     logger.info("Extracted %d face(s) for check", len(new_faces))
 
@@ -410,22 +446,28 @@ def check_faces_with_progress(
     for idx, (image_data, filename) in enumerate(images):
         try:
             pil_image = ImageOps.exif_transpose(Image.open(BytesIO(image_data)).convert("RGB"))
-            if max(pil_image.size) > 1200:
-                pil_image.thumbnail((1200, 1200), Image.LANCZOS)
+            if max(pil_image.size) > MAX_IMAGE_PX:
+                pil_image.thumbnail((MAX_IMAGE_PX, MAX_IMAGE_PX), Image.LANCZOS)
         except Exception as exc:
             logger.warning("Cannot open %r: %s", filename, exc)
             if progress_cb: progress_cb(idx + 1, total, len(new_faces))
             continue
 
         np_image = np.array(pil_image)
+        h, w = np_image.shape[:2]
+
         try:
             locations = face_recognition.face_locations(np_image, model=detection_model)
         except Exception as exc:
             logger.warning("face_locations failed for %r: %s", filename, exc)
+            del np_image, pil_image
+            gc.collect()
             if progress_cb: progress_cb(idx + 1, total, len(new_faces))
             continue
 
         if not locations:
+            del np_image, pil_image
+            gc.collect()
             if progress_cb: progress_cb(idx + 1, total, len(new_faces))
             continue
 
@@ -433,17 +475,22 @@ def check_faces_with_progress(
             encodings = face_recognition.face_encodings(np_image, locations)
         except Exception as exc:
             logger.warning("face_encodings failed for %r: %s", filename, exc)
+            del np_image, pil_image
+            gc.collect()
             if progress_cb: progress_cb(idx + 1, total, len(new_faces))
             continue
 
+        del np_image
+
         for (top, right, bottom, left), encoding in zip(locations, encodings):
             pad = 20
-            h, w = np_image.shape[:2]
             crop = pil_image.crop((max(0, left-pad), max(0, top-pad), min(w, right+pad), min(h, bottom+pad)))
             face_filename = f"{uuid.uuid4()}.jpg"
             crop.save(os.path.join(tmp_dir, face_filename), "JPEG", quality=90)
             new_faces.append((encoding, f"/faces/tmp/{face_filename}"))
 
+        del pil_image
+        gc.collect()
         if progress_cb: progress_cb(idx + 1, total, len(new_faces))
 
     logger.info("Extracted %d face(s) for progressive check", len(new_faces))

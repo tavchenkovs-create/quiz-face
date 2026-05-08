@@ -91,6 +91,23 @@ def download_photos(urls: list[str], max_workers: int = 10, timeout: int = 30) -
         return list(executor.map(_fetch, urls))
 
 
+def iter_photos(urls: list[str], timeout: int = 30):
+    """
+    Download and yield photo bytes one at a time (sequential).
+    Yields None for photos that fail to download.
+    Use instead of download_photos when memory is constrained — each photo
+    is downloaded, yielded, and can be freed before the next one starts.
+    """
+    for url in urls:
+        try:
+            r = requests.get(url, timeout=timeout)
+            r.raise_for_status()
+            yield r.content
+        except Exception as exc:
+            logger.warning("Failed to download %s: %s", url, exc)
+            yield None
+
+
 def get_album_photos(album_url: str, vk_token: str) -> list[bytes]:
     """
     Fetch all photos from a public VK album and return them as a list of bytes.

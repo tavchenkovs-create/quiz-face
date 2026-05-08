@@ -22,7 +22,7 @@ from .services import (
     load_all_quiz_faces,
 )
 from .task_store import tasks, tasks_lock
-from .vk import download_photos, get_album_photo_urls
+from .vk import download_photos, get_album_photo_urls, iter_photos
 
 logger = logging.getLogger(__name__)
 
@@ -124,17 +124,13 @@ def _run_vk_bg(
         with tasks_lock:
             tasks[task_id]["total"] = len(urls)
 
-        # Step 2: download all photos in parallel
-        raw = download_photos(urls)
-        logger.info("Downloaded %d/%d VK photo(s)", sum(1 for b in raw if b), len(urls))
-
-        # Step 3: create quiz/game, then process photos sequentially
+        # Step 2: create quiz/game, then download+process each photo immediately
         quiz = get_or_create_quiz(db, quiz_name)
         game = get_or_create_game(db, quiz.id, game_date)
         db.commit()
 
         faces_found = 0
-        for i, image_data in enumerate(raw):
+        for i, image_data in enumerate(iter_photos(urls)):
             if image_data:
                 face_results: list[dict] = []
                 try:
@@ -203,14 +199,13 @@ def _run_batch_bg(task_id: str, items: list[dict]) -> None:
             game_date = date_type.fromisoformat(game_date_str)
 
             urls = get_album_photo_urls(album_url, VK_SERVICE_KEY)
-            raw  = download_photos(urls)
 
             quiz = get_or_create_quiz(db, quiz_name)
             game = get_or_create_game(db, quiz.id, game_date)
             db.commit()
 
             faces_found = 0
-            for j, image_data in enumerate(raw):
+            for j, image_data in enumerate(iter_photos(urls)):
                 if image_data:
                     face_results: list[dict] = []
                     try:
