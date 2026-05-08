@@ -1,6 +1,8 @@
+import gc
 import logging
 import os
 import threading
+import time
 import uuid as uuid_module
 from datetime import date as date_type
 
@@ -22,7 +24,7 @@ from .services import (
     load_all_quiz_faces,
 )
 from .task_store import tasks, tasks_lock
-from .vk import download_photos, get_album_photo_urls, iter_photos
+from .vk import download_photos, download_photos_batch, get_album_photo_urls
 
 logger = logging.getLogger(__name__)
 
@@ -124,31 +126,37 @@ def _run_vk_bg(
         with tasks_lock:
             tasks[task_id]["total"] = len(urls)
 
-        # Step 2: create quiz/game, then download+process each photo immediately
+        # Step 2: create quiz/game, then download+process in batches of 25
         quiz = get_or_create_quiz(db, quiz_name)
         game = get_or_create_game(db, quiz.id, game_date)
         db.commit()
 
         faces_found = 0
-        for i, image_data in enumerate(iter_photos(urls)):
-            if image_data:
-                face_results: list[dict] = []
-                try:
-                    orig_path, face_results = extract_faces_parallel(
-                        image_data, f"vk_{i+1}.jpg", game.id, UPLOADS_DIR, FACE_DETECTION_MODEL
-                    )
-                    _save_faces_to_db(db, game.id, orig_path, face_results)
-                    db.commit()
-                except Exception:
-                    logger.exception("Error processing VK photo %d", i + 1)
-                    try: db.rollback()
-                    except Exception: pass
-                faces_found += len(face_results)
+        for batch_start in range(0, len(urls), 25):
+            batch = download_photos_batch(urls[batch_start:batch_start + 25])
+            for j_local, image_data in enumerate(batch):
+                i = batch_start + j_local
+                if image_data:
+                    face_results: list[dict] = []
+                    try:
+                        orig_path, face_results = extract_faces_parallel(
+                            image_data, f"vk_{i+1}.jpg", game.id, UPLOADS_DIR, FACE_DETECTION_MODEL
+                        )
+                        _save_faces_to_db(db, game.id, orig_path, face_results)
+                        db.commit()
+                    except Exception:
+                        logger.exception("Error processing VK photo %d", i + 1)
+                        try: db.rollback()
+                        except Exception: pass
+                    faces_found += len(face_results)
 
-            with tasks_lock:
-                t = tasks[task_id]
-                t["processed"] = i + 1
-                t["faces_found"] = faces_found
+                with tasks_lock:
+                    t = tasks[task_id]
+                    t["processed"] = i + 1
+                    t["faces_found"] = faces_found
+
+            gc.collect()
+            time.sleep(1)
 
         with tasks_lock:
             tasks[task_id].update({"done": True, "total_photos": len(urls)})
@@ -205,23 +213,29 @@ def _run_batch_bg(task_id: str, items: list[dict]) -> None:
             db.commit()
 
             faces_found = 0
-            for j, image_data in enumerate(iter_photos(urls)):
-                if image_data:
-                    face_results: list[dict] = []
-                    try:
-                        orig_path, face_results = extract_faces_parallel(
-                            image_data, f"vk_{j+1}.jpg", game.id, UPLOADS_DIR, FACE_DETECTION_MODEL
-                        )
-                        _save_faces_to_db(db, game.id, orig_path, face_results)
-                        db.commit()
-                    except Exception:
-                        logger.exception("Batch %s: error processing photo %d of album %d", task_id, j + 1, i + 1)
-                        try: db.rollback()
-                        except Exception: pass
-                    faces_found += len(face_results)
+            for batch_start in range(0, len(urls), 25):
+                batch = download_photos_batch(urls[batch_start:batch_start + 25])
+                for j_local, image_data in enumerate(batch):
+                    j = batch_start + j_local
+                    if image_data:
+                        face_results: list[dict] = []
+                        try:
+                            orig_path, face_results = extract_faces_parallel(
+                                image_data, f"vk_{j+1}.jpg", game.id, UPLOADS_DIR, FACE_DETECTION_MODEL
+                            )
+                            _save_faces_to_db(db, game.id, orig_path, face_results)
+                            db.commit()
+                        except Exception:
+                            logger.exception("Batch %s: error processing photo %d of album %d", task_id, j + 1, i + 1)
+                            try: db.rollback()
+                            except Exception: pass
+                        faces_found += len(face_results)
 
-                with tasks_lock:
-                    tasks[task_id].update({"current_faces": faces_found, "current_photos": j + 1})
+                    with tasks_lock:
+                        tasks[task_id].update({"current_faces": faces_found, "current_photos": j + 1})
+
+                gc.collect()
+                time.sleep(1)
 
             with tasks_lock:
                 tasks[task_id]["results"].append({

@@ -91,6 +91,11 @@ def download_photos(urls: list[str], max_workers: int = 10, timeout: int = 30) -
         return list(executor.map(_fetch, urls))
 
 
+def download_photos_batch(urls: list[str], timeout: int = 30) -> list[bytes | None]:
+    """Download a batch of photos with max 5 parallel workers to limit peak memory."""
+    return download_photos(urls, max_workers=5, timeout=timeout)
+
+
 def iter_photos(urls: list[str], timeout: int = 30):
     """
     Download and yield photo bytes one at a time (sequential).
