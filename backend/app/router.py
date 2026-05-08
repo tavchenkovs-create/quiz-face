@@ -197,8 +197,9 @@ def _run_batch_bg(task_id: str, items: list[dict]) -> None:
                 "current_photos":     0,
             })
 
-        db = SessionLocal()
+        db = None
         try:
+            db = SessionLocal()
             game_date = date_type.fromisoformat(game_date_str)
 
             urls = get_album_photo_urls(album_url, VK_SERVICE_KEY)
@@ -238,8 +239,9 @@ def _run_batch_bg(task_id: str, items: list[dict]) -> None:
 
         except Exception as exc:
             logger.exception("Batch %s: album %d failed", task_id, i + 1)
-            try: db.rollback()
-            except Exception: pass
+            if db:
+                try: db.rollback()
+                except Exception: pass
             with tasks_lock:
                 tasks[task_id]["results"].append({
                     "quiz_name": quiz_name,
@@ -247,7 +249,8 @@ def _run_batch_bg(task_id: str, items: list[dict]) -> None:
                     "error":     str(exc),
                 })
         finally:
-            db.close()
+            if db:
+                db.close()
 
     with tasks_lock:
         tasks[task_id]["done"] = True

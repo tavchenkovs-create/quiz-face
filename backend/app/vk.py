@@ -73,7 +73,7 @@ def get_album_photo_urls(album_url: str, vk_token: str) -> list[str]:
     return urls
 
 
-def download_photos(urls: list[str], max_workers: int = 10, timeout: int = 15) -> list[bytes | None]:
+def download_photos(urls: list[str], max_workers: int = 10, timeout: int = 30) -> list[bytes | None]:
     """
     Download photos in parallel.
     Returns a list in the same order as urls; None for any photo that failed to download.

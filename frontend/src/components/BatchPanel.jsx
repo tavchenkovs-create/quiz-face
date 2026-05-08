@@ -80,6 +80,7 @@ export default function BatchPanel({ onRefresh }) {
           const prog = await res.json()
           failures = 0
 
+
           const results      = prog.results      || []
           const currentAlbum = prog.current_album || 0  // 1-based into validItems
 
@@ -128,13 +129,13 @@ export default function BatchPanel({ onRefresh }) {
           }
         } catch {
           failures++
-          if (failures >= 3) {
+          if (failures >= 10) {
             stopAll()
             setError('Потеряно соединение с сервером')
             setRunning(false)
           }
         }
-      }, 2000)
+      }, 3000)
     } catch (err) {
       setError(err.message)
       setRunning(false)
