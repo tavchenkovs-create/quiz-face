@@ -12,9 +12,11 @@ export default function BatchPanel({ onRefresh }) {
   const [overallTotal, setOverallTotal] = useState(0)
   const [allDone, setAllDone]           = useState(false)
   const [error, setError]               = useState(null)
+  const [checkingResult, setCheckingResult] = useState(false)
 
   const intervalRef = useRef(null)
   const timerRef    = useRef(null)
+  const taskIdRef   = useRef(null)
   const [, setTick] = useState(0)   // forces re-render every second for live loading elapsed
 
   useEffect(() => () => {
@@ -64,6 +66,7 @@ export default function BatchPanel({ onRefresh }) {
       onRefresh()
 
       const taskId = data.task_id
+      taskIdRef.current = taskId
       let failures = 0
 
       timerRef.current = setInterval(() => setTick(t => t + 1), 1000)
@@ -129,16 +132,53 @@ export default function BatchPanel({ onRefresh }) {
           }
         } catch {
           failures++
-          if (failures >= 10) {
+          if (failures >= 20) {
             stopAll()
             setError('Потеряно соединение с сервером')
             setRunning(false)
           }
         }
-      }, 3000)
+      }, 4000)
     } catch (err) {
       setError(err.message)
       setRunning(false)
+    }
+  }
+
+  const handleCheckResult = async () => {
+    if (!taskIdRef.current) return
+    setCheckingResult(true)
+    try {
+      const res = await fetch(getProgressUrl(taskIdRef.current))
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const prog = await res.json()
+      if (prog.done) {
+        const results = prog.results || []
+        setItems(prev => {
+          const next = [...prev]
+          let validIdx = 0
+          for (let i = 0; i < next.length; i++) {
+            if (next[i].parseError) continue
+            if (validIdx < results.length) {
+              const r = results[validIdx]
+              if (next[i].status !== 'done' && next[i].status !== 'error') {
+                next[i] = { ...next[i], status: r.status, result: r, elapsed: 0 }
+              }
+            }
+            validIdx++
+          }
+          return next
+        })
+        setOverallDone(results.length)
+        setOverallTotal(prog.total_albums || results.length)
+        setAllDone(true)
+        setError(null)
+        onRefresh()
+      }
+    } catch {
+      // keep error shown if check also fails
+    } finally {
+      setCheckingResult(false)
     }
   }
 
@@ -150,6 +190,16 @@ export default function BatchPanel({ onRefresh }) {
       {error && (
         <div className="error-banner" role="alert">
           <span className="error-banner__msg">{error}</span>
+          {taskIdRef.current && (
+            <button
+              type="button"
+              className="error-banner__check"
+              onClick={handleCheckResult}
+              disabled={checkingResult}
+            >
+              {checkingResult ? 'Проверяем…' : 'Проверить результат'}
+            </button>
+          )}
           <button type="button" className="error-banner__close" onClick={() => setError(null)}>×</button>
         </div>
       )}

@@ -74,6 +74,21 @@ body {
 }
 .error-banner__close:hover { opacity: 1; }
 
+.error-banner__check {
+  background: none;
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  color: var(--error);
+  font-size: .8125rem;
+  font-weight: 600;
+  padding: .25rem .625rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background .15s;
+}
+.error-banner__check:hover:not(:disabled) { background: rgba(220,38,38,.08); }
+.error-banner__check:disabled { opacity: .5; cursor: not-allowed; }
+
 /* ─── Card ───────────────────────────────────────────────────────────────── */
 .card {
   background: var(--surface);

@@ -19,9 +19,12 @@ export default function UploadTab({ quizzes, onRefresh }) {
   const [saved, setSaved]           = useState(null)    // final result
   const [error, setError]           = useState(null)
 
-  const intervalRef = useRef(null)
-  const timerRef    = useRef(null)
+  const intervalRef  = useRef(null)
+  const timerRef     = useRef(null)
+  const taskIdRef    = useRef(null)
+  const secondsRef   = useRef(0)
   const [elapsed, setElapsed] = useState(0)
+  const [checkingResult, setCheckingResult] = useState(false)
 
   // Clean up both intervals on unmount
   useEffect(() => () => {
@@ -40,6 +43,8 @@ export default function UploadTab({ quizzes, onRefresh }) {
   const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   const startPolling = (taskId) => {
+    taskIdRef.current  = taskId
+    secondsRef.current = 0
     setProgress({ processed: 0, total: 0, facesFound: 0 })
     setElapsed(0)
     let failures = 0
@@ -47,6 +52,7 @@ export default function UploadTab({ quizzes, onRefresh }) {
 
     timerRef.current = setInterval(() => {
       seconds += 1
+      secondsRef.current = seconds
       setElapsed(seconds)
     }, 1000)
 
@@ -82,13 +88,31 @@ export default function UploadTab({ quizzes, onRefresh }) {
         }
       } catch {
         failures += 1
-        if (failures >= 3) {
+        if (failures >= 20) {
           stopAll()
           setError('Потеряно соединение с сервером во время обработки')
           setProgress(null)
         }
       }
-    }, 2000)
+    }, 4000)
+  }
+
+  const handleCheckResult = async () => {
+    if (!taskIdRef.current) return
+    setCheckingResult(true)
+    try {
+      const res = await fetch(getProgressUrl(taskIdRef.current))
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      if (data.done) {
+        setSaved({ total_faces_found: data.faces_found, total_photos: data.total_photos ?? data.total, elapsed: secondsRef.current })
+        setError(null)
+      }
+    } catch {
+      // keep error shown if check also fails
+    } finally {
+      setCheckingResult(false)
+    }
   }
 
   const handleSubmit = async (e) => {
@@ -144,6 +168,16 @@ export default function UploadTab({ quizzes, onRefresh }) {
       {error && (
         <div className="error-banner" role="alert">
           <span className="error-banner__msg">{error}</span>
+          {taskIdRef.current && (
+            <button
+              type="button"
+              className="error-banner__check"
+              onClick={handleCheckResult}
+              disabled={checkingResult}
+            >
+              {checkingResult ? 'Проверяем…' : 'Проверить результат'}
+            </button>
+          )}
           <button type="button" className="error-banner__close" onClick={() => setError(null)}>×</button>
         </div>
       )}
