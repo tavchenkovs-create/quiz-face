@@ -3,6 +3,9 @@
 
 set -e
 
+# Remove self to avoid git pull conflict
+rm -f /app/deploy.sh
+
 echo "=== Pulling latest code ==="
 cd /app
 git pull origin main
