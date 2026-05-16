@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { uploadBatch, getProgressUrl } from '../api'
+import { uploadBatch, getProgressUrl, getAuthHeaders } from '../api'
 
 const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
@@ -78,7 +78,7 @@ export default function BatchPanel({ onRefresh }) {
 
       intervalRef.current = setInterval(async () => {
         try {
-          const res = await fetch(getProgressUrl(taskId))
+          const res = await fetch(getProgressUrl(taskId), { headers: getAuthHeaders() })
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
           const prog = await res.json()
           failures = 0
@@ -149,7 +149,7 @@ export default function BatchPanel({ onRefresh }) {
     if (!taskIdRef.current) return
     setCheckingResult(true)
     try {
-      const res = await fetch(getProgressUrl(taskIdRef.current))
+      const res = await fetch(getProgressUrl(taskIdRef.current), { headers: getAuthHeaders() })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const prog = await res.json()
       if (prog.done) {

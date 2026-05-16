@@ -1,7 +1,25 @@
 const BASE_URL = import.meta.env.VITE_API_URL || ''
 
+export const getAuthHeaders = () => {
+  const token = localStorage.getItem('auth_token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+export async function login(password) {
+  const res = await fetch(`${BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  })
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({}))
+    throw new Error(b.detail || 'Неверный пароль')
+  }
+  return res.json()
+}
+
 export async function fetchQuizzes() {
-  const res = await fetch(`${BASE_URL}/quizzes`)
+  const res = await fetch(`${BASE_URL}/quizzes`, { headers: getAuthHeaders() })
   if (!res.ok) throw new Error(`Не удалось загрузить список квизов (${res.status})`)
   return res.json()
 }
@@ -13,7 +31,7 @@ export async function uploadPhotos({ files, quizName, gameDate }) {
   form.append('game_date', gameDate)
   for (const file of files) form.append('files', file)
 
-  const res = await fetch(`${BASE_URL}/upload`, { method: 'POST', body: form })
+  const res = await fetch(`${BASE_URL}/upload`, { method: 'POST', body: form, headers: getAuthHeaders() })
   if (!res.ok) {
     let detail = `Ошибка сервера (${res.status})`
     try { const b = await res.json(); if (b.detail) detail = b.detail } catch (_) {}
@@ -26,7 +44,7 @@ export async function uploadPhotos({ files, quizName, gameDate }) {
 export async function uploadFromVk({ quizName, gameDate, albumUrl }) {
   const res = await fetch(`${BASE_URL}/upload-from-vk`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ quiz_name: quizName, game_date: gameDate, album_url: albumUrl }),
   })
   if (!res.ok) {
@@ -41,7 +59,7 @@ export async function uploadFromVk({ quizName, gameDate, albumUrl }) {
 export async function checkFromVk({ quizName, albumUrl, tolerance = 0.45 }) {
   const res = await fetch(`${BASE_URL}/check-from-vk`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ quiz_name: quizName, album_url: albumUrl, tolerance }),
   })
   if (!res.ok) {
@@ -58,7 +76,7 @@ export async function checkPhotos({ files, quizName, tolerance = 0.45 }) {
   form.append('tolerance', tolerance)
   for (const file of files) form.append('files', file)
 
-  const res = await fetch(`${BASE_URL}/check`, { method: 'POST', body: form })
+  const res = await fetch(`${BASE_URL}/check`, { method: 'POST', body: form, headers: getAuthHeaders() })
   if (!res.ok) {
     let detail = `Ошибка сервера (${res.status})`
     try { const b = await res.json(); if (b.detail) detail = b.detail } catch (_) {}
@@ -68,19 +86,19 @@ export async function checkPhotos({ files, quizName, tolerance = 0.45 }) {
 }
 
 export async function fetchStats() {
-  const res = await fetch(`${BASE_URL}/stats`)
+  const res = await fetch(`${BASE_URL}/stats`, { headers: getAuthHeaders() })
   if (!res.ok) throw new Error(`Не удалось загрузить статистику (${res.status})`)
   return res.json()
 }
 
 export async function fetchDatabase() {
-  const res = await fetch(`${BASE_URL}/database`)
+  const res = await fetch(`${BASE_URL}/database`, { headers: getAuthHeaders() })
   if (!res.ok) throw new Error(`Не удалось загрузить базу данных (${res.status})`)
   return res.json()
 }
 
 export async function deleteGame(gameId) {
-  const res = await fetch(`${BASE_URL}/games/${gameId}`, { method: 'DELETE' })
+  const res = await fetch(`${BASE_URL}/games/${gameId}`, { method: 'DELETE', headers: getAuthHeaders() })
   if (!res.ok) {
     let detail = `Ошибка сервера (${res.status})`
     try { const b = await res.json(); if (b.detail) detail = b.detail } catch (_) {}
@@ -93,7 +111,7 @@ export async function deleteGame(gameId) {
 export async function uploadBatch(items) {
   const res = await fetch(`${BASE_URL}/upload-batch`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ items }),
   })
   if (!res.ok) {

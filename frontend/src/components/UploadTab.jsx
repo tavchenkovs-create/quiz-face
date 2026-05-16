@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { uploadPhotos, uploadFromVk, getProgressUrl } from '../api'
+import { uploadPhotos, uploadFromVk, getProgressUrl, getAuthHeaders } from '../api'
 import DropZone from './DropZone'
 import ProgressBar from './ProgressBar'
 import BatchPanel from './BatchPanel'
@@ -63,7 +63,7 @@ export default function UploadTab({ quizzes, onRefresh }) {
 
     intervalRef.current = setInterval(async () => {
       try {
-        const res = await fetch(getProgressUrl(taskId))
+        const res = await fetch(getProgressUrl(taskId), { headers: getAuthHeaders() })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
         failures = 0
@@ -101,7 +101,7 @@ export default function UploadTab({ quizzes, onRefresh }) {
     if (!taskIdRef.current) return
     setCheckingResult(true)
     try {
-      const res = await fetch(getProgressUrl(taskIdRef.current))
+      const res = await fetch(getProgressUrl(taskIdRef.current), { headers: getAuthHeaders() })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       if (data.done) {

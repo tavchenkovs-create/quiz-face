@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from .auth import check_token
 from .config import FACE_DETECTION_MODEL, FACE_TOLERANCE, UPLOADS_DIR, VK_SERVICE_KEY
 from .database import SessionLocal, get_db
 from .models import FaceEncoding, Game, Photo, Quiz
@@ -28,7 +29,7 @@ from .vk import download_photos, download_photos_batch, get_album_photo_urls
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(check_token)])
 
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 

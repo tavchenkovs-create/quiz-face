@@ -6,10 +6,11 @@ from dotenv import load_dotenv
 
 load_dotenv()  # load .env before importing app modules that read env vars
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.auth import auth_router, check_token
 from app.config import UPLOADS_DIR
 from app.database import engine
 from app.models import Base
@@ -48,9 +49,10 @@ app.add_middleware(
 if os.path.isdir(UPLOADS_DIR):
     app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
+app.include_router(auth_router)
 app.include_router(router)
 
 
 @app.get("/health")
-def health():
+def health(_: None = Depends(check_token)):
     return {"status": "ok"}

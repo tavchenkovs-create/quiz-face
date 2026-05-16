@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { checkPhotos, checkFromVk, getProgressUrl } from '../api'
+import { checkPhotos, checkFromVk, getProgressUrl, getAuthHeaders } from '../api'
 import DropZone from './DropZone'
 import ProgressBar from './ProgressBar'
 import Results from './Results'
@@ -55,7 +55,7 @@ export default function CheckTab({ quizzes }) {
 
     intervalRef.current = setInterval(async () => {
       try {
-        const res = await fetch(getProgressUrl(taskId))
+        const res = await fetch(getProgressUrl(taskId), { headers: getAuthHeaders() })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
         failures = 0
